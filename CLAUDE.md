@@ -14,13 +14,16 @@ Marathon spectator planner. Read SPEC.md for what to build and why; this file co
 - Cache routing results; never call a routing API inside the DP inner loop without the straight-line prefilter.
 - Don't add dependencies without saying why.
 
+## Stack
+- Backend: Go (standard library `net/http`, no framework). Core modules live in `internal/`: `geo`, `gpx`, `pace`, `candidates`, `travel`, `planner`.
+- Frontend (later): Angular with Leaflet and OpenStreetMap tiles.
+- Deploy: one Docker container (Go serves the API and the built UI) under `/srv/cheersquad` on the EC2 host, published on `127.0.0.1:8085` and proxied by the host Nginx.
+
 ## Commands
-Fill these in once the stack is chosen:
-- Run tests: `TODO`
-- Run server: `TODO`
-- Lint/format: `TODO`
+- Run tests: `go test ./...`
+- Run server: `TODO` (added with the API)
+- Lint/format: `gofmt -l . && go vet ./...`
 
 ## Open decisions
-- Language/framework (backend)
 - Routing provider (OSRM self-hosted vs. hosted API)
-- How users specify closures and crossing points
+- Closures: v1 plan is that users click crossing points on the map, and `travel.Closures` blocks legs that cross the course elsewhere
