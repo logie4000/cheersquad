@@ -22,7 +22,7 @@ Marathon spectator planner. Read SPEC.md for what to build and why; this file co
 ## Commands
 - Run tests: `go test ./...` and `cd web && npx ng test --watch=false`
 - Run server: `go run ./cmd/cheersquad` (API on :8080) plus `cd web && npx ng serve` (proxies `/api` to :8080), or `docker compose up --build` for the whole app on 127.0.0.1:8085
-- Deploy: see `deploy/README.md`
+- Deploy: CI green on main -> Images workflow pushes `cheersquad-app:<sha>` to ECR -> on the host `deploy/scripts/deploy.sh` (see `deploy/README.md`). Mirrors logie4000/sweat-equity's setup; keep them consistent.
 - Lint/format: `gofmt -l . && go vet ./...` and `cd web && npx prettier --check "src/**/*.{ts,html,css}"`
 
 ## Open decisions

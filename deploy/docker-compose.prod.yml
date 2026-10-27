@@ -1,0 +1,10 @@
+# Production overlay: run the image the Images workflow pushed to ECR instead
+# of building on the host.
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml --env-file .env up -d
+#
+# (deploy/scripts/deploy.sh writes .env and does this.)
+services:
+  cheersquad:
+    build: !reset null
+    image: ${ECR_REGISTRY:?set ECR_REGISTRY}/${COMPOSE_PROJECT_NAME:-cheersquad}-app:${IMAGE_TAG:-latest}
