@@ -21,7 +21,8 @@ Marathon spectator planner. Read SPEC.md for what to build and why; this file co
 
 ## Commands
 - Run tests: `go test ./...`
-- Run server: `TODO` (added with the API)
+- Run server: `go run ./cmd/cheersquad` (API on :8080 at `/api/`), or `docker compose up --build` (on 127.0.0.1:8085)
+- Deploy: see `deploy/README.md`
 - Lint/format: `gofmt -l . && go vet ./...`
 
 ## Open decisions
