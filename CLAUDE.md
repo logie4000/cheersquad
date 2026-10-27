@@ -17,11 +17,12 @@ Marathon spectator planner. Read SPEC.md for what to build and why; this file co
 ## Stack
 - Backend: Go (standard library `net/http`, no framework). Core modules live in `internal/`: `geo`, `gpx`, `pace`, `candidates`, `travel`, `planner`.
 - Frontend (later): Angular with Leaflet and OpenStreetMap tiles.
-- Deploy: one Docker container (Go serves the API and the built UI) under `/srv/cheersquad` on the EC2 host, published on `127.0.0.1:8085` and proxied by the host Nginx.
+- Deploy: one Docker container (Go serves the API and the built UI) under `/srv/cheersquad` on the EC2 host, published on `127.0.0.1:8085`. The host Nginx serves it at `www.teapothill.org/cheersquad/`, stripping the prefix, so the UI must use base href `/cheersquad/` and relative API URLs (`api/plan`, never `/api/plan`).
 
 ## Commands
 - Run tests: `go test ./...`
-- Run server: `TODO` (added with the API)
+- Run server: `go run ./cmd/cheersquad` (API on :8080 at `/api/`), or `docker compose up --build` (on 127.0.0.1:8085)
+- Deploy: see `deploy/README.md`
 - Lint/format: `gofmt -l . && go vet ./...`
 
 ## Open decisions
