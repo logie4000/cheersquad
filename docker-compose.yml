@@ -1,0 +1,9 @@
+services:
+  cheersquad:
+    build: .
+    image: cheersquad:latest
+    container_name: cheersquad
+    restart: unless-stopped
+    # Only reachable from the host; the host Nginx proxies to it.
+    ports:
+      - "127.0.0.1:8085:8080"
