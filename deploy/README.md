@@ -3,7 +3,10 @@
 CheerSquad runs as one Docker container on the EC2 host (Amazon Linux 2023,
 x86_64), next to the other sites. The Go server inside serves the API at
 `/api/` and the web UI at `/`. Docker publishes it on `127.0.0.1:8085`
-only, and the host Nginx proxies `www.teapothill.org` to it.
+only, and the host Nginx proxies `https://www.teapothill.org/cheersquad/`
+to it, stripping the `/cheersquad` prefix. The UI is built with base href
+`/cheersquad/` and calls the API with relative URLs, so it works under that
+path.
 
 ## First deploy
 
@@ -16,13 +19,14 @@ cd /srv/cheersquad
 sudo docker compose up -d --build
 curl -s http://127.0.0.1:8085/api/healthz    # -> ok
 
-# 3. Add the Nginx site and reload.
-sudo cp deploy/nginx/www.teapothill.org.conf /etc/nginx/conf.d/
+# 3. Add the /cheersquad/ location to the existing www.teapothill.org
+#    server block (paste deploy/nginx/cheersquad.location.conf into it, or
+#    `include /srv/cheersquad/deploy/nginx/cheersquad.location.conf;`).
 sudo nginx -t && sudo systemctl reload nginx
-
-# 4. HTTPS (once DNS for www.teapothill.org points at this instance).
-sudo certbot --nginx -d www.teapothill.org
+curl -s https://www.teapothill.org/cheersquad/api/healthz   # -> ok
 ```
+
+HTTPS is already handled by the existing www.teapothill.org server block.
 
 ## Updating
 
@@ -41,5 +45,5 @@ sudo docker inspect --format '{{.State.Health.Status}}' cheersquad
 ```
 
 If port 8085 is already taken by another site, change the left-hand side of
-`ports` in `docker-compose.yml` and the `proxy_pass` port in the Nginx file
-to match.
+`ports` in `docker-compose.yml` and the `proxy_pass` port in the Nginx
+snippet to match.
