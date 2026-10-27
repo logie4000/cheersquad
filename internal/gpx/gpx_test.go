@@ -1,0 +1,74 @@
+package gpx
+
+import (
+	"math"
+	"strings"
+	"testing"
+
+	"github.com/logie4000/cheersquad/internal/geo"
+)
+
+const sample = `<?xml version="1.0"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><trkseg>
+    <trkpt lat="0" lon="0"></trkpt>
+    <trkpt lat="0.01" lon="0"></trkpt>
+    <trkpt lat="0.01" lon="0"></trkpt>
+  </trkseg><trkseg>
+    <trkpt lat="0.02" lon="0"></trkpt>
+  </trkseg></trk>
+</gpx>`
+
+var degLat = geo.Distance(geo.LatLon{}, geo.LatLon{Lat: 1})
+
+func TestParseJoinsSegmentsAndDropsDuplicates(t *testing.T) {
+	tr, err := Parse(strings.NewReader(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Points) != 3 {
+		t.Fatalf("got %d points, want 3", len(tr.Points))
+	}
+	if math.Abs(tr.Length()-0.02*degLat) > 0.01 {
+		t.Fatalf("length %f", tr.Length())
+	}
+}
+
+func TestParseRouteFallback(t *testing.T) {
+	doc := `<gpx><rte><rtept lat="0" lon="0"/><rtept lat="0.01" lon="0"/></rte></gpx>`
+	tr, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Points) != 2 {
+		t.Fatalf("got %d points", len(tr.Points))
+	}
+}
+
+func TestParseRejectsEmpty(t *testing.T) {
+	if _, err := Parse(strings.NewReader(`<gpx><trk><trkseg><trkpt lat="1" lon="1"/></trkseg></trk></gpx>`)); err == nil {
+		t.Fatal("expected error for single-point course")
+	}
+	if _, err := Parse(strings.NewReader(`not xml`)); err == nil {
+		t.Fatal("expected error for bad XML")
+	}
+}
+
+func TestCalibrateAndPointAt(t *testing.T) {
+	tr, _ := Parse(strings.NewReader(sample))
+	tr.Calibrate(2000)
+	if math.Abs(tr.Length()-2000) > 1e-9 {
+		t.Fatalf("length %f", tr.Length())
+	}
+	// Halfway along the calibrated course is the middle point.
+	p := tr.PointAt(1000)
+	if math.Abs(p.Lat-0.01) > 1e-9 {
+		t.Fatalf("PointAt(1000) = %+v", p)
+	}
+	if got := tr.PointAt(-5); got != tr.Points[0] {
+		t.Fatalf("PointAt clamps low: %+v", got)
+	}
+	if got := tr.PointAt(1e9); got != tr.Points[len(tr.Points)-1] {
+		t.Fatalf("PointAt clamps high: %+v", got)
+	}
+}
