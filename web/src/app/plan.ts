@@ -1,0 +1,190 @@
+// Types for the /api/plan contract and the unit conversions at the UI edge.
+// The API works in meters and seconds since the gun; the UI shows miles and
+// clock times.
+
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export type Mode = 'walk' | 'bike' | 'transit' | 'drive';
+
+export interface Area {
+  center: LatLon;
+  radius: number;
+}
+
+export interface PlanParams {
+  runner: {
+    finishSeconds: number;
+    split: number;
+    startDelaySeconds: number;
+    uncertainty: number;
+  };
+  spectator: {
+    start: LatLon;
+    startTimeSeconds: number;
+    mode: Mode;
+    bufferSeconds: number;
+  };
+  certifiedMeters?: number;
+  spacingMeters?: number;
+  pinned?: LatLon[];
+  excluded?: Area[];
+  crossings?: LatLon[];
+  mileWeights?: Record<string, number>;
+  maxStops?: number;
+}
+
+export interface PlanNode {
+  id: number;
+  pos: LatLon;
+  dist: number;
+  tFast: number;
+  tExpected: number;
+  tSlow: number;
+  weight: number;
+  pinned: boolean;
+}
+
+export interface Stop {
+  node: PlanNode;
+  depart: number;
+  travel: number;
+  arrive: number;
+  wait: number;
+}
+
+export interface PlanResponse {
+  course: { points: LatLon[]; length: number };
+  mode: Mode;
+  candidates: number;
+  plan: { stops: Stop[]; sightings: number; value: number };
+}
+
+export const METERS_PER_MILE = 1609.344;
+
+/** Parses "h:mm:ss", "h:mm" or "mm" into seconds; NaN if malformed. */
+export function parseDuration(s: string): number {
+  const parts = s.trim().split(':');
+  if (parts.length > 3 || parts.some((p) => !/^\d+$/.test(p))) {
+    return NaN;
+  }
+  const n = parts.map(Number);
+  if (n.length === 1) return n[0] * 60;
+  if (n.length === 2) return n[0] * 3600 + n[1] * 60;
+  return n[0] * 3600 + n[1] * 60 + n[2];
+}
+
+/** Parses a 24-hour "HH:MM" clock time into seconds after midnight. */
+export function parseClock(s: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+  if (!m || +m[1] > 23 || +m[2] > 59) return NaN;
+  return +m[1] * 3600 + +m[2] * 60;
+}
+
+/** Formats seconds since the gun as a clock time, given the gun's clock time. */
+export function formatClock(sinceGun: number, gunClock: number): string {
+  const day = 24 * 3600;
+  const t = (((Math.round(sinceGun + gunClock) % day) + day) % day) / 60;
+  const h = Math.floor(t / 60);
+  const m = Math.round(t % 60);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** Formats a number of seconds as "1h 05m" or "12m". */
+export function formatMinutes(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds / 60));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+/** Reads track points (or route points) from GPX text for the map preview. */
+export function parseGpxPoints(text: string): LatLon[] {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length > 0) {
+    return [];
+  }
+  let els = Array.from(doc.getElementsByTagNameNS('*', 'trkpt'));
+  if (els.length === 0) {
+    els = Array.from(doc.getElementsByTagNameNS('*', 'rtept'));
+  }
+  return els
+    .map((el) => ({ lat: Number(el.getAttribute('lat')), lon: Number(el.getAttribute('lon')) }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+}
+
+/** Form values as the user enters them. */
+export interface PlanForm {
+  goalFinish: string; // h:mm:ss chip time
+  splitPercent: number; // + positive split, - negative
+  startDelayMinutes: number;
+  uncertaintyPercent: number;
+  distance: 'gpx' | 'marathon' | 'half' | 'custom';
+  customMiles: number | null;
+  gunTime: string; // HH:MM
+  spectatorStart: string; // HH:MM
+  mode: Mode;
+  bufferMinutes: number;
+  maxStops: number;
+  lateMilesFrom: number | null; // weight late miles from this mile on
+  lateMilesWeight: number;
+}
+
+export interface MapMarks {
+  start: LatLon | null;
+  pinned: LatLon[];
+  excluded: LatLon[];
+  crossings: LatLon[];
+}
+
+/** Radius in meters around an excluded spot. */
+export const EXCLUDE_RADIUS = 150;
+
+/** Converts the form and map marks into API params, or returns an error. */
+export function buildParams(f: PlanForm, marks: MapMarks): PlanParams | string {
+  const finish = parseDuration(f.goalFinish);
+  if (!Number.isFinite(finish) || finish <= 0) return 'Enter a goal finish time like 3:45:00.';
+  const gun = parseClock(f.gunTime);
+  if (!Number.isFinite(gun)) return 'Enter the gun time as HH:MM (24-hour).';
+  const leave = parseClock(f.spectatorStart);
+  if (!Number.isFinite(leave)) return 'Enter when you set off as HH:MM (24-hour).';
+  if (!marks.start) return 'Click the map to set where you start from.';
+
+  let certifiedMeters: number | undefined;
+  if (f.distance === 'marathon') certifiedMeters = 42195;
+  if (f.distance === 'half') certifiedMeters = 21097.5;
+  if (f.distance === 'custom') {
+    if (!f.customMiles || f.customMiles <= 0) return 'Enter the course distance in miles.';
+    certifiedMeters = f.customMiles * METERS_PER_MILE;
+  }
+
+  let mileWeights: Record<string, number> | undefined;
+  if (f.lateMilesFrom && f.lateMilesWeight !== 1) {
+    mileWeights = {};
+    for (let m = f.lateMilesFrom; m <= 30; m++) mileWeights[String(m)] = f.lateMilesWeight;
+  }
+
+  return {
+    runner: {
+      finishSeconds: finish,
+      split: f.splitPercent / 100,
+      startDelaySeconds: f.startDelayMinutes * 60,
+      uncertainty: f.uncertaintyPercent / 100,
+    },
+    spectator: {
+      start: marks.start,
+      startTimeSeconds: leave - gun,
+      mode: f.mode,
+      bufferSeconds: f.bufferMinutes * 60,
+    },
+    certifiedMeters,
+    pinned: marks.pinned,
+    excluded: marks.excluded.map((center) => ({ center, radius: EXCLUDE_RADIUS })),
+    crossings: marks.crossings,
+    mileWeights,
+    maxStops: f.maxStops,
+  };
+}

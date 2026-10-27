@@ -1,0 +1,36 @@
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  color: #212529;
+}
+
+/* Map badges (Leaflet divIcons live outside component styles). */
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: white;
+  font:
+    600 12px system-ui,
+    sans-serif;
+}
+.badge-start {
+  background: #f08c00;
+}
+.badge-pin {
+  background: #d6336c;
+}
+.badge-cross {
+  background: #495057;
+}
+.badge-stop {
+  background: #1c7ed6;
+}

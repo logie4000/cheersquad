@@ -1,0 +1,98 @@
+:host {
+  display: block;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+}
+header h1 {
+  margin: 0;
+  color: #d6336c;
+}
+header p {
+  margin: 4px 0 16px;
+  color: #495057;
+}
+main {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: 16px;
+}
+@media (max-width: 800px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+}
+fieldset {
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  margin: 0 0 12px;
+  padding: 8px 12px 12px;
+}
+legend {
+  font-weight: 600;
+}
+label {
+  display: block;
+  margin-top: 8px;
+  font-size: 14px;
+}
+label input:not([type='radio']),
+label select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 2px;
+  padding: 6px;
+  font: inherit;
+}
+small {
+  color: #868e96;
+}
+.modes .mode {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+button[type='submit'] {
+  width: 100%;
+  padding: 10px;
+  font-size: 16px;
+  background: #d6336c;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+button[disabled] {
+  opacity: 0.6;
+}
+button.link {
+  display: block;
+  background: none;
+  border: 0;
+  padding: 8px 0 0;
+  color: #1c7ed6;
+  cursor: pointer;
+}
+.error {
+  color: #c92a2a;
+}
+.results app-course-map {
+  height: 60vh;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 14px;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px;
+  border-bottom: 1px solid #dee2e6;
+}
+.note {
+  font-size: 13px;
+  color: #868e96;
+}

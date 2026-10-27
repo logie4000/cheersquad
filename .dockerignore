@@ -3,3 +3,5 @@
 deploy
 *.md
 **/node_modules
+web/dist
+web/.angular

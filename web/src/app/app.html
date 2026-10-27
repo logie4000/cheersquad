@@ -1,0 +1,160 @@
+<header>
+  <h1>CheerSquad</h1>
+  <p>Plan where to stand so you see your runner as many times as possible.</p>
+</header>
+
+<main>
+  <form [formGroup]="form" (ngSubmit)="submit()" class="panel">
+    <fieldset>
+      <legend>Course</legend>
+      <label
+        >GPX file <input type="file" accept=".gpx,application/gpx+xml" (change)="onFile($event)"
+      /></label>
+      <label>
+        Official distance
+        <select formControlName="distance">
+          <option value="marathon">Marathon (26.2 mi)</option>
+          <option value="half">Half marathon (13.1 mi)</option>
+          <option value="custom">Other…</option>
+          <option value="gpx">Use the GPX length</option>
+        </select>
+      </label>
+      @if (form.controls.distance.value === 'custom') {
+        <label
+          >Miles <input type="number" step="0.1" min="0" formControlName="customMiles"
+        /></label>
+      }
+      <label>Gun time <input type="time" formControlName="gunTime" /></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Runner</legend>
+      <label
+        >Goal finish (h:mm:ss) <input formControlName="goalFinish" placeholder="3:45:00"
+      /></label>
+      <label
+        >Start delay after gun (min)
+        <input type="number" min="0" formControlName="startDelayMinutes"
+      /></label>
+      <label>
+        Split (%)
+        <input type="number" step="0.5" formControlName="splitPercent" />
+        <small>Positive if the second half is slower.</small>
+      </label>
+      <label
+        >Pace uncertainty (±%)
+        <input type="number" min="0" max="50" formControlName="uncertaintyPercent"
+      /></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>You</legend>
+      <label>Set off at <input type="time" formControlName="spectatorStart" /></label>
+      <label>
+        Getting around by
+        <select formControlName="mode">
+          <option value="walk">Walking</option>
+          <option value="bike">Bike</option>
+          <option value="transit">Transit</option>
+          <option value="drive">Car</option>
+        </select>
+      </label>
+      <label
+        >Arrive at least (min) before <input type="number" min="0" formControlName="bufferMinutes"
+      /></label>
+      <label
+        >Max stops (0 = no limit) <input type="number" min="0" formControlName="maxStops"
+      /></label>
+      <label>
+        Count late miles extra from mile
+        <input type="number" min="1" formControlName="lateMilesFrom" placeholder="e.g. 20" />
+      </label>
+      @if (form.controls.lateMilesFrom.value) {
+        <label
+          >…worth <input type="number" min="1" step="0.5" formControlName="lateMilesWeight" /> × a
+          normal sighting</label
+        >
+      }
+    </fieldset>
+
+    <fieldset>
+      <legend>Map clicks set</legend>
+      <div class="modes">
+        @for (m of clickModes; track m.value) {
+          <label class="mode">
+            <input
+              type="radio"
+              name="clickMode"
+              [checked]="clickMode() === m.value"
+              (change)="clickMode.set(m.value)"
+            />
+            {{ m.label }}
+          </label>
+        }
+      </div>
+      <small>Crossing points are where you can cross the course while it's closed.</small>
+      <button type="button" class="link" (click)="clearMarks()">
+        Clear pins, exclusions and crossings
+      </button>
+    </fieldset>
+
+    @if (error()) {
+      <p class="error" role="alert">{{ error() }}</p>
+    }
+    <button type="submit" [disabled]="loading()">
+      {{ loading() ? 'Planning…' : 'Plan my day' }}
+    </button>
+  </form>
+
+  <section class="results">
+    <app-course-map
+      [course]="course()"
+      [marks]="marks()"
+      [stops]="stops()"
+      (mapClick)="onMapClick($event)"
+    />
+
+    @if (result(); as r) {
+      @if (r.plan.stops.length > 0) {
+        <h2>{{ r.plan.sightings }} sighting{{ r.plan.sightings === 1 ? '' : 's' }}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Mile</th>
+              <th>Leave</th>
+              <th>Arrive</th>
+              <th>Runner passes</th>
+              <th>Wait</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (s of r.plan.stops; track s.node.id; let i = $index) {
+              <tr>
+                <td>{{ i + 1 }}</td>
+                <td>
+                  <a [href]="mapsLink(s.node.pos)" target="_blank" rel="noopener">{{
+                    mile(s.node.dist)
+                  }}</a>
+                </td>
+                <td>{{ clock(s.depart) }}</td>
+                <td>
+                  {{ clock(s.arrive) }} <small>({{ minutes(s.travel) }} {{ r.mode }})</small>
+                </td>
+                <td>
+                  {{ clock(s.node.tExpected) }}
+                  <small>({{ clock(s.node.tFast) }}–{{ clock(s.node.tSlow) }})</small>
+                </td>
+                <td>{{ minutes(s.wait) }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        <p class="note">
+          Leave times assume the runner is at the slow end of their window, so you can go sooner
+          once you've seen them. Travel times are straight-line estimates for now, not real routes.
+        </p>
+      }
+    }
+  </section>
+</main>

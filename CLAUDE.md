@@ -16,14 +16,14 @@ Marathon spectator planner. Read SPEC.md for what to build and why; this file co
 
 ## Stack
 - Backend: Go (standard library `net/http`, no framework). Core modules live in `internal/`: `geo`, `gpx`, `pace`, `candidates`, `travel`, `planner`.
-- Frontend (later): Angular with Leaflet and OpenStreetMap tiles.
-- Deploy: one Docker container (Go serves the API and the built UI) under `/srv/cheersquad` on the EC2 host, published on `127.0.0.1:8085`. The host Nginx serves it at `www.teapothill.org/cheersquad/`, stripping the prefix, so the UI must use base href `/cheersquad/` and relative API URLs (`api/plan`, never `/api/plan`).
+- Frontend: Angular in `web/` with Leaflet and OpenStreetMap tiles. Unit conversion (clock times, miles) happens in `web/src/app/plan.ts`.
+- Deploy: one Docker container (Go serves the API and the built UI) under `/srv/cheersquad` on the EC2 host, published on `127.0.0.1:8085`. The host Nginx serves it at `www.teapothill.org/cheersquad/`, stripping the prefix, so the UI uses a relative base href (`./`) and relative API URLs (`api/plan`, never `/api/plan`).
 
 ## Commands
-- Run tests: `go test ./...`
-- Run server: `go run ./cmd/cheersquad` (API on :8080 at `/api/`), or `docker compose up --build` (on 127.0.0.1:8085)
+- Run tests: `go test ./...` and `cd web && npx ng test --watch=false`
+- Run server: `go run ./cmd/cheersquad` (API on :8080) plus `cd web && npx ng serve` (proxies `/api` to :8080), or `docker compose up --build` for the whole app on 127.0.0.1:8085
 - Deploy: see `deploy/README.md`
-- Lint/format: `gofmt -l . && go vet ./...`
+- Lint/format: `gofmt -l . && go vet ./...` and `cd web && npx prettier --check "src/**/*.{ts,html,css}"`
 
 ## Open decisions
 - Routing provider (OSRM self-hosted vs. hosted API)

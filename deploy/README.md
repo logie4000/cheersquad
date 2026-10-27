@@ -4,9 +4,8 @@ CheerSquad runs as one Docker container on the EC2 host (Amazon Linux 2023,
 x86_64), next to the other sites. The Go server inside serves the API at
 `/api/` and the web UI at `/`. Docker publishes it on `127.0.0.1:8085`
 only, and the host Nginx proxies `https://www.teapothill.org/cheersquad/`
-to it, stripping the `/cheersquad` prefix. The UI is built with base href
-`/cheersquad/` and calls the API with relative URLs, so it works under that
-path.
+to it, stripping the `/cheersquad` prefix. The UI uses a relative base href and
+relative API URLs, so it works under that path (or at the root locally).
 
 ## First deploy
 
