@@ -1,12 +1,58 @@
+/* Fonts and colors follow logie4000/sweat-equity (web/src/styles.scss). */
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #ffffff;
+  --muted: #6b6b70;
+  --border: #d9d9de;
+  --accent: #2f5bd3;
+  --error: #b3261e;
+  --card: #ffffff;
+  --page: #fafaf9;
+  --brand: darkblue;
+  --display: 'Big Shoulders', Impact, 'Arial Narrow', sans-serif;
+  /* Map badges, from sweat-equity's plan hues. */
+  --badge-start: #e8710a;
+  --badge-pin: #c2185b;
+  --badge-cross: #6b6b70;
+  --badge-stop: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #ececf1;
+    --bg: #16161a;
+    --muted: #a0a0a8;
+    --border: #33333a;
+    --accent: #8aa8ff;
+    --error: #ff8a80;
+    --card: #1e1e23;
+    --page: #16161a;
+    /* darkblue is unreadable on the dark background. */
+    --brand: #8aa8ff;
+    /* Badges sit on light map tiles, so the stop keeps the light-theme blue. */
+    --badge-stop: #2f5bd3;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family:
     system-ui,
     -apple-system,
     'Segoe UI',
-    Roboto,
     sans-serif;
-  color: #212529;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--page);
+}
+
+a {
+  color: var(--accent);
 }
 
 /* Map badges (Leaflet divIcons live outside component styles). */
@@ -23,14 +69,14 @@ body {
     sans-serif;
 }
 .badge-start {
-  background: #f08c00;
+  background: var(--badge-start);
 }
 .badge-pin {
-  background: #d6336c;
+  background: var(--badge-pin);
 }
 .badge-cross {
-  background: #495057;
+  background: var(--badge-cross);
 }
 .badge-stop {
-  background: #1c7ed6;
+  background: var(--badge-stop);
 }
