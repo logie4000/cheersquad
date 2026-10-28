@@ -1,8 +1,9 @@
 """Build a GTFS feed of London's rail-like lines from TfL's timetables.
 
-TfL publishes TransXChange (XML), not GTFS. This keeps the Underground, DLR,
-trams, Overground and Elizabeth line files, drops buses, coaches and boats,
-and converts the rest with transx2gtfs (https://github.com/HTenkanen/transx2gtfs).
+TfL publishes TransXChange (XML), not GTFS. This keeps the Underground, DLR
+and tram files (TfL's timetables leave out the Overground and Elizabeth
+line), drops buses, coaches and boats, and converts the rest with
+transx2gtfs (https://github.com/HTenkanen/transx2gtfs).
 
     python tfl_to_gtfs.py OUT.zip
 
@@ -38,7 +39,15 @@ USER_AGENT = "cheersquad-fetch-gtfs/1.0 (+https://github.com/logie4000/cheersqua
 # metro and rail that runs often enough.
 KEEP_MODES = {"underground", "metro", "tram", "rail"}
 
-MODE_RE = re.compile(rb"<Mode>\s*([A-Za-z]+)\s*</Mode>")
+MODE_RE = re.compile(rb"<(?:\w+:)?Mode>\s*([A-Za-z]+)\s*</(?:\w+:)?Mode>")
+
+# TfL's own files carry no <Mode> (transx2gtfs would call them buses), so
+# its rail-like services are recognised by operator code instead. Note
+# "LU" alone is London United, a bus company.
+OPERATOR_MODES = {"LUL": "underground", "DLR": "metro", "TRAM": "tram"}
+
+OPERATOR_RE = re.compile(rb"<(?:\w+:)?OperatorCode>\s*([A-Za-z0-9]+)\s*</(?:\w+:)?OperatorCode>")
+SERVICE_CODE_END_RE = re.compile(rb"(</(?:\w+:)?ServiceCode>)")
 
 # TfL line codes as they appear in route codes (e.g. "1-VIC"), with the
 # line's name and colour, so the map shows "Victoria" in light blue rather
@@ -56,6 +65,7 @@ TFL_LINES = {
     "VIC": ("Victoria", "0098D4"),
     "WAC": ("Waterloo & City", "95CDBA"),
     "DLR": ("DLR", "00A4A7"),
+    "TRM": ("Tram", "5FB526"),
 }
 
 
@@ -63,6 +73,24 @@ def mode_of(xml):
     """The TransXChange Mode of a file, lower case, or "" if it has none."""
     m = MODE_RE.search(xml)
     return m.group(1).decode().lower() if m else ""
+
+
+def rail_mode(xml):
+    """The mode to convert a file as, or "" to skip it: its own Mode if it
+    has one, else the mode of its operator."""
+    mode = mode_of(xml)
+    if mode:
+        return mode if mode in KEEP_MODES else ""
+    m = OPERATOR_RE.search(xml)
+    return OPERATOR_MODES.get(m.group(1).decode().upper(), "") if m else ""
+
+
+def with_mode(xml, mode):
+    """Add <Mode> to each Service of a file that has none, so transx2gtfs
+    gives its routes the right route_type."""
+    if mode_of(xml):
+        return xml
+    return SERVICE_CODE_END_RE.sub(rb"\1<Mode>" + mode.encode() + rb"</Mode>", xml)
 
 
 def extract_rail(archive, out_dir, prefix=""):
@@ -78,10 +106,11 @@ def extract_rail(archive, out_dir, prefix=""):
             kept, skipped = kept + k, skipped + s
         elif lower.endswith(".xml"):
             data = archive.read(info)
-            if mode_of(data) in KEEP_MODES:
+            mode = rail_mode(data)
+            if mode:
                 dest = os.path.join(out_dir, prefix + os.path.basename(name))
                 with open(dest, "wb") as f:
-                    f.write(data)
+                    f.write(with_mode(data, mode))
                 kept += 1
             else:
                 skipped += 1
