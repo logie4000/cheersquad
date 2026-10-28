@@ -22,7 +22,10 @@
 #            https://developer.wmata.com in WMATA_API_KEY
 #   london   TfL Underground, DLR, trams, Overground and Elizabeth line,
 #            converted from TfL's TransXChange timetables in a python
-#            container (needs docker; no TfL key needed)
+#            container (needs docker; no TfL key needed). If TfL
+#            refuses the download (403 from cloud hosts), download
+#            journey-planner-timetables.zip in a browser and set
+#            TFL_TIMETABLES_FILE to it
 set -euo pipefail
 
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"
@@ -80,8 +83,21 @@ for arg in "$@"; do
       # TfL publishes TransXChange, not GTFS; convert it with transx2gtfs.
       scripts=$(cd "$(dirname "$0")" && pwd)
       out=$(cd "$dir" && pwd)
-      echo "fetching london from TfL and converting (this takes a while)"
-      docker run --rm -v "$out:/gtfs" -v "$scripts:/scripts:ro" \
+      # TfL's firewall refuses some cloud hosts (denali gets 403), so
+      # TFL_TIMETABLES_FILE can name a copy downloaded elsewhere.
+      local_copy=()
+      if [[ -n ${TFL_TIMETABLES_FILE:-} ]]; then
+        if [[ ! -f $TFL_TIMETABLES_FILE ]]; then
+          echo "TFL_TIMETABLES_FILE: no such file: $TFL_TIMETABLES_FILE" >&2
+          exit 1
+        fi
+        tfl_dir=$(cd "$(dirname "$TFL_TIMETABLES_FILE")" && pwd)
+        local_copy=(-v "$tfl_dir:/tfl:ro" -e "TFL_TIMETABLES_FILE=/tfl/$(basename "$TFL_TIMETABLES_FILE")")
+        echo "converting london from $TFL_TIMETABLES_FILE (this takes a while)"
+      else
+        echo "fetching london from TfL and converting (this takes a while)"
+      fi
+      docker run --rm -v "$out:/gtfs" -v "$scripts:/scripts:ro" "${local_copy[@]}" \
         -e TFL_APP_KEY -e TFL_TIMETABLES_URL \
         python:3.12-slim sh -c \
         'pip install -q --root-user-action=ignore transx2gtfs==0.6.0 && python /scripts/tfl_to_gtfs.py /gtfs/london.zip' ||
