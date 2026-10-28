@@ -482,3 +482,104 @@ func TestRailKeptOnlyIfFrequent(t *testing.T) {
 		t.Fatal("rail R every 10 min should be dropped with a 5 min limit")
 	}
 }
+
+// writeFeed writes a GTFS feed of the given files to a temp dir.
+func writeFeed(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+const lineStops = `stop_id,stop_name,stop_lat,stop_lon
+P,Papa,40,-74
+Q,Quebec,40,-73.99
+R,Romeo,40,-73.98
+`
+
+// A Sunday with a planned diversion can run more trips than a normal one
+// while cutting the line short; the normal Sunday should win (MBTA's
+// Green Line was cut off from downtown this way).
+func TestSkipsDiversionSunday(t *testing.T) {
+	dir := writeFeed(t, map[string]string{
+		"routes.txt": "route_id,route_short_name,route_type\nL,L,1\n",
+		"stops.txt":  lineStops,
+		"calendar.txt": `service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+NORM,0,0,0,0,0,0,1,20260101,20261231
+`,
+		"calendar_dates.txt": `service_id,date,exception_type
+NORM,20260301,2
+DIV,20260301,1
+`,
+		"trips.txt": `route_id,service_id,trip_id
+L,NORM,n1
+L,NORM,n2
+L,DIV,d1
+L,DIV,d2
+L,DIV,d3
+L,DIV,d4
+`,
+		"stop_times.txt": `trip_id,arrival_time,departure_time,stop_id,stop_sequence
+n1,08:00:00,08:00:00,P,1
+n1,08:02:00,08:02:00,Q,2
+n1,08:04:00,08:04:00,R,3
+n2,08:10:00,08:10:00,P,1
+n2,08:12:00,08:12:00,Q,2
+n2,08:14:00,08:14:00,R,3
+d1,08:00:00,08:00:00,Q,1
+d1,08:02:00,08:02:00,R,2
+d2,08:05:00,08:05:00,Q,1
+d2,08:07:00,08:07:00,R,2
+d3,08:10:00,08:10:00,Q,1
+d3,08:12:00,08:12:00,R,2
+d4,08:15:00,08:15:00,Q,1
+d4,08:17:00,08:17:00,R,2
+`,
+	})
+	n := load(t, dir, Options{})
+	idx := indexes(t, n)
+	if _, ok := idx["P"]; !ok {
+		t.Fatalf("picked the diversion Sunday: stations %v", n.Stations())
+	}
+	if _, ok := n.Time(idx["P"], idx["R"]); !ok {
+		t.Fatal("P->R should be reachable on a normal Sunday")
+	}
+}
+
+// VBB splits each S-Bahn line into many route variants. Two variants every
+// 20 minutes make one line every 10, which is frequent enough to keep, and
+// the wait is half the combined headway.
+func TestMergesRouteVariants(t *testing.T) {
+	dir := writeFeed(t, map[string]string{
+		"routes.txt": "route_id,route_short_name,route_type\nV1,S5,109\nV2,S5,109\n",
+		"stops.txt":  lineStops,
+		"trips.txt":  "route_id,service_id,trip_id\nV1,ALL,a1\nV1,ALL,a2\nV1,ALL,a3\nV2,ALL,b1\nV2,ALL,b2\nV2,ALL,b3\n",
+		"stop_times.txt": `trip_id,arrival_time,departure_time,stop_id,stop_sequence
+a1,08:00:00,08:00:00,P,1
+a1,08:03:00,08:03:00,Q,2
+a2,08:20:00,08:20:00,P,1
+a2,08:23:00,08:23:00,Q,2
+a3,08:40:00,08:40:00,P,1
+a3,08:43:00,08:43:00,Q,2
+b1,08:10:00,08:10:00,P,1
+b1,08:13:00,08:13:00,Q,2
+b2,08:30:00,08:30:00,P,1
+b2,08:33:00,08:33:00,Q,2
+b3,08:50:00,08:50:00,P,1
+b3,08:53:00,08:53:00,Q,2
+`,
+	})
+	n := load(t, dir, Options{})
+	idx := indexes(t, n)
+	got, ok := n.Time(idx["P"], idx["Q"])
+	if want := 120.0 + 300 + 180; !ok || !near(got, want) {
+		t.Fatalf("P->Q = %v, %v; want %v (entry + half of a 10 min headway + ride)", got, ok, want)
+	}
+	if r := n.Rides(idx["P"], idx["Q"]); len(r) != 1 || r[0].Line != "S5" {
+		t.Fatalf("rides %+v", r)
+	}
+}

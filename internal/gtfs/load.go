@@ -199,12 +199,9 @@ type depKey struct {
 
 // build is the whole load once the feed's files are reachable.
 func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
-	name, err := readAgency(fsys)
+	agencies, err := readAgency(fsys)
 	if err != nil {
 		return nil, err
-	}
-	if name == "" {
-		name = fallbackName
 	}
 
 	lines, routeIdx, err := readRoutes(fsys, o.RouteTypes, o.RailTypes)
@@ -217,7 +214,27 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 		return nil, err
 	}
 
-	active, err := selectService(fsys, trips, o.ServiceDate)
+	stops, stopIdx, err := readStops(fsys)
+	if err != nil {
+		return nil, err
+	}
+	root := resolveStations(stops, stopIdx)
+
+	all := make([]bool, len(trips))
+	for i := range all {
+		all[i] = true
+	}
+	tripStops, err := readStopTimes(fsys, tripIdx, all, stopIdx)
+	if err != nil {
+		return nil, err
+	}
+	for ti, sts := range tripStops {
+		if len(sts) > 0 {
+			tripStops[ti] = prepareTrip(sts, root)
+		}
+	}
+
+	active, err := selectService(fsys, trips, o.ServiceDate, serviceEdges(trips, tripStops))
 	if err != nil {
 		return nil, err
 	}
@@ -227,22 +244,18 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 		keep[i] = active == nil || active[t.service]
 		if keep[i] {
 			kept++
+		} else {
+			tripStops[i] = nil
 		}
 	}
 	if kept == 0 {
 		return nil, errors.New("no subway trips run on the selected service day")
 	}
-
-	stops, stopIdx, err := readStops(fsys)
-	if err != nil {
-		return nil, err
+	name := mainAgency(agencies, lines, trips, keep)
+	if name == "" {
+		name = fallbackName
 	}
-	root := resolveStations(stops, stopIdx)
 
-	tripStops, err := readStopTimes(fsys, tripIdx, keep, stopIdx)
-	if err != nil {
-		return nil, err
-	}
 	freqs, err := readFrequencies(fsys, tripIdx, keep)
 	if err != nil {
 		return nil, err
@@ -265,7 +278,7 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 			continue
 		}
 		t := trips[ti]
-		merged := prepareTrip(sts, root)
+		merged := sts
 		prev := int32(-1)
 		for k := 0; k+1 < len(merged); k++ {
 			a, b := merged[k], merged[k+1]
@@ -286,10 +299,11 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 			if a.dep >= 0 && b.arr >= 0 && b.arr >= a.dep {
 				obs[e] = append(obs[e], float64(b.arr-a.dep))
 			}
-			dk := depKey{int32(t.route), a.stop, "d" + t.dir}
-			if t.dir == "" {
-				dk.dir = "n" + strconv.Itoa(int(b.stop))
-			}
+			// Departures are grouped by the next station rather than
+			// direction_id, which feeds that split a line into several
+			// route variants don't number consistently. It also gives
+			// each branch its own headway past a fork.
+			dk := depKey{int32(t.route), a.stop, "n" + strconv.Itoa(int(b.stop))}
 			if !containsKey(edgeDirs[e], dk) {
 				edgeDirs[e] = append(edgeDirs[e], dk)
 			}
@@ -490,31 +504,55 @@ func prepareTrip(sts []stopTime, root []int32) []stopTime {
 	return out
 }
 
-func readAgency(fsys fs.FS) (string, error) {
+// readAgency returns agency names by agency_id ("" for a feed whose single
+// agency has no id).
+func readAgency(fsys fs.FS) (map[string]string, error) {
 	t, err := openTable(fsys, "agency.txt", false)
-	if err != nil {
-		return "", err
+	if err != nil || t == nil {
+		return nil, err
 	}
 	defer t.close()
+	names := map[string]string{}
 	for {
 		ok, err := t.next()
 		if err != nil || !ok {
-			return "", err
+			return names, err
 		}
 		if n := t.get("agency_name"); n != "" {
-			return n, nil
+			names[t.get("agency_id")] = n
 		}
 	}
+}
+
+// mainAgency names the network after the agency running the most kept
+// trips: a feed's first agency can be a minor partner (the MBTA feed lists
+// the Cape Cod RTA first).
+func mainAgency(agencies map[string]string, lines []line, trips []tripRow, keep []bool) string {
+	if len(agencies) == 1 {
+		for _, n := range agencies {
+			return n
+		}
+	}
+	count := map[string]int{}
+	for i, t := range trips {
+		if keep[i] {
+			count[lines[t.route].agency]++
+		}
+	}
+	best, bestN := "", 0
+	for id, n := range count {
+		if agencies[id] != "" && (n > bestN || (n == bestN && id < best)) {
+			best, bestN = id, n
+		}
+	}
+	return agencies[best]
 }
 
 // dropInfrequentRail clears the stop times of trips on rail routes whose
 // best headway in the window is longer than o.FrequentHeadway, so they
 // don't become part of the network.
 func dropInfrequentRail(lines []line, trips []tripRow, tripStops [][]stopTime, freqs map[int][]freqRow, o Options) {
-	type key struct {
-		stop int32
-		dir  string
-	}
+	type key struct{ stop, next int32 }
 	deps := make([]map[key][]int32, len(lines))
 	freqBest := make([]float64, len(lines))
 	for r := range freqBest {
@@ -533,10 +571,10 @@ func dropInfrequentRail(lines []line, trips []tripRow, tripStops [][]stopTime, f
 		if deps[t.route] == nil {
 			deps[t.route] = map[key][]int32{}
 		}
-		for _, s := range sts {
-			if d := s.dep; d >= 0 && float64(d) >= o.WindowStart && float64(d) <= o.WindowEnd {
-				k := key{s.stop, t.dir}
-				deps[t.route][k] = append(deps[t.route][k], d)
+		for k := 0; k+1 < len(sts); k++ {
+			if d := sts[k].dep; d >= 0 && float64(d) >= o.WindowStart && float64(d) <= o.WindowEnd {
+				kk := key{sts[k].stop, sts[k+1].stop}
+				deps[t.route][kk] = append(deps[t.route][kk], d)
 			}
 		}
 	}
@@ -581,6 +619,11 @@ func readRoutes(fsys fs.FS, types, railTypes []int) ([]line, map[string]int, err
 			allowed[rt], rail[rt] = true, true
 		}
 	}
+	type lineKey struct {
+		agency, label string
+		rt            int
+	}
+	byLine := map[lineKey]int{}
 	var lines []line
 	idx := map[string]int{}
 	for {
@@ -603,8 +646,20 @@ func readRoutes(fsys fs.FS, types, railTypes []int) ([]line, map[string]int, err
 		if label == "" {
 			label = id
 		}
-		idx[id] = len(lines)
-		lines = append(lines, line{label: label, color: strings.TrimPrefix(t.get("route_color"), "#"), rail: rail[rt]})
+		// Some feeds (VBB) split one line into many route variants with a
+		// few trips each; merge them so the line's headway, frequency and
+		// transfers are judged as a whole.
+		k := lineKey{t.get("agency_id"), label, rt}
+		li, ok := byLine[k]
+		if !ok {
+			li = len(lines)
+			byLine[k] = li
+			lines = append(lines, line{label: label, rail: rail[rt], agency: k.agency})
+		}
+		if c := strings.TrimPrefix(t.get("route_color"), "#"); lines[li].color == "" {
+			lines[li].color = c
+		}
+		idx[id] = li
 	}
 	if len(lines) == 0 {
 		return nil, nil, fmt.Errorf("no subway or metro routes (route_type in %v) in routes.txt", types)
@@ -648,7 +703,24 @@ func readTrips(fsys fs.FS, routeIdx map[string]int) ([]tripRow, map[string]int, 
 // no date given it picks the Sunday on which the most subway trips run;
 // if no Sunday has service per calendar.txt/calendar_dates.txt it returns
 // nil.
-func selectService(fsys fs.FS, trips []tripRow, date time.Time) (map[string]bool, error) {
+// serviceEdges lists, per service_id, the station-to-station hops its
+// trips ride, so service days can be compared by how much of the network
+// they run.
+func serviceEdges(trips []tripRow, tripStops [][]stopTime) map[string]map[edgeKey]bool {
+	out := map[string]map[edgeKey]bool{}
+	for ti, sts := range tripStops {
+		t := trips[ti]
+		for k := 0; k+1 < len(sts); k++ {
+			if out[t.service] == nil {
+				out[t.service] = map[edgeKey]bool{}
+			}
+			out[t.service][edgeKey{int32(t.route), sts[k].stop, sts[k+1].stop}] = true
+		}
+	}
+	return out
+}
+
+func selectService(fsys fs.FS, trips []tripRow, date time.Time, edges map[string]map[edgeKey]bool) (map[string]bool, error) {
 	type calRow struct {
 		days       [7]bool // by time.Weekday
 		start, end time.Time
@@ -759,14 +831,25 @@ func selectService(fsys fs.FS, trips []tripRow, date time.Time) (map[string]bool
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Before(candidates[j]) })
+	// The best Sunday runs the most of the network, so a Sunday with a
+	// planned diversion (shuttle buses replacing a stretch of line) loses
+	// to a normal one even if the diversion schedule has more trips. Trip
+	// count breaks ties.
 	var best map[string]bool
-	bestN := 0
+	bestE, bestN := 0, 0
 	for i, d := range candidates {
 		if i > 0 && d.Equal(candidates[i-1]) {
 			continue
 		}
-		if set, n := activeOn(d); n > bestN {
-			best, bestN = set, n
+		set, n := activeOn(d)
+		hops := map[edgeKey]bool{}
+		for svc := range set {
+			for e := range edges[svc] {
+				hops[e] = true
+			}
+		}
+		if e := len(hops); e > bestE || (e == bestE && n > bestN) {
+			best, bestE, bestN = set, e, n
 		}
 	}
 	return best, nil

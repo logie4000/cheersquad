@@ -9,9 +9,10 @@ import (
 
 // line is one kept GTFS route.
 type line struct {
-	label string
-	color string
-	rail  bool // kept only if frequent; see Options.RailTypes
+	label  string
+	color  string
+	rail   bool   // kept only if frequent; see Options.RailTypes
+	agency string // agency_id
 }
 
 // edge is a ride on one route between consecutive stations of its trips.
