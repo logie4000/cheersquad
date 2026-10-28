@@ -279,19 +279,19 @@ func chooseRouting(cfg Config, mode travel.Mode, start geo.LatLon, course []geo.
 	return routing{walk: stub, label: "Straight-line estimate"}
 }
 
-// covers reports whether n serves the spectator's start and at least half
-// of the course.
+// covers reports whether n serves the spectator's start or any part of the
+// course. Point-to-point courses like Boston start far outside the subway,
+// and legs there simply come out as walking.
 func covers(n travel.Network, start geo.LatLon, course []geo.LatLon) bool {
-	if !n.Covers(start) {
-		return false
+	if n.Covers(start) {
+		return true
 	}
-	in := 0
 	for _, p := range course {
 		if n.Covers(p) {
-			in++
+			return true
 		}
 	}
-	return 2*in >= len(course)
+	return false
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {

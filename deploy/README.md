@@ -71,8 +71,11 @@ The SHAs are listed in each Images run's summary.
 ## Subway routing
 
 In transit mode the planner routes over real subway lines from GTFS
-schedule feeds (the zip files transit agencies publish). Only subway and
-metro lines are used: on marathon day buses are rerouted or stuck behind
+schedule feeds (the zip files transit agencies publish). Only subway, metro
+and light rail lines are used (light rail covers lines like Boston's Green
+Line), plus rail lines such as Berlin's S-Bahn or Paris's RER when they run
+at least every 15 minutes on Sunday morning (hourly commuter rail is left
+out). Buses never are: on marathon day they are rerouted or stuck behind
 closures, so they aren't a realistic option. Waits come from each line's
 scheduled frequency, not exact departures.
 

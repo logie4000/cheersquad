@@ -11,6 +11,7 @@ import (
 type line struct {
 	label string
 	color string
+	rail  bool // kept only if frequent; see Options.RailTypes
 }
 
 // edge is a ride on one route between consecutive stations of its trips.

@@ -26,9 +26,16 @@ import (
 // default; times are seconds.
 type Options struct {
 	// RouteTypes are the GTFS route_type values to keep. Default
-	// {1, 400, 401, 402} (subway/metro). Bus types (3, 11, 200-299,
+	// DefaultRouteTypes (subway, metro, light rail). Bus types (3, 11, 200-299,
 	// 700-799, 800) are never kept, even if listed here.
 	RouteTypes []int
+	// RailTypes are rail route_type values (S-Bahn, RER, commuter rail)
+	// kept only for routes that run at least every FrequentHeadway seconds
+	// somewhere in the window. Default DefaultRailTypes.
+	RailTypes []int
+	// FrequentHeadway is the longest headway a rail route may have and
+	// still be kept. Default 900.
+	FrequentHeadway float64
 	// WindowStart and WindowEnd bound the departures used to measure
 	// headways, in seconds after the start of the service day. Default
 	// 07:00 to 14:00.
@@ -51,8 +58,15 @@ type Options struct {
 	ServiceDate time.Time
 }
 
-// DefaultRouteTypes are subway and metro route types.
-var DefaultRouteTypes = []int{1, 400, 401, 402}
+// DefaultRouteTypes are subway, metro and light rail route types. Light
+// rail (0, 900) is included because some systems file their subway-like
+// lines under it, such as Boston's Green Line and Mattapan trolley.
+var DefaultRouteTypes = []int{0, 1, 400, 401, 402, 900}
+
+// DefaultRailTypes are rail and its extended types (100-117), such as
+// Berlin's S-Bahn (109) and Paris's RER (2). Frequent ones run like a
+// subway; hourly commuter rail is no use for chasing a runner.
+var DefaultRailTypes = []int{2, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117}
 
 const (
 	walkSpeed      = 1.2  // m/s for walking transfers between stations
@@ -86,6 +100,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.TransferWalkMeters == 0 {
 		o.TransferWalkMeters = 250
+	}
+	if len(o.RailTypes) == 0 {
+		o.RailTypes = DefaultRailTypes
+	}
+	if o.FrequentHeadway == 0 {
+		o.FrequentHeadway = 900
 	}
 	return o
 }
@@ -187,7 +207,7 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 		name = fallbackName
 	}
 
-	lines, routeIdx, err := readRoutes(fsys, o.RouteTypes)
+	lines, routeIdx, err := readRoutes(fsys, o.RouteTypes, o.RailTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +247,7 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 	if err != nil {
 		return nil, err
 	}
+	dropInfrequentRail(lines, trips, tripStops, freqs, o)
 
 	// Walk every kept trip in feed order, collecting ride observations,
 	// on-train continuations and departures.
@@ -486,7 +507,60 @@ func readAgency(fsys fs.FS) (string, error) {
 	}
 }
 
-func readRoutes(fsys fs.FS, types []int) ([]line, map[string]int, error) {
+// dropInfrequentRail clears the stop times of trips on rail routes whose
+// best headway in the window is longer than o.FrequentHeadway, so they
+// don't become part of the network.
+func dropInfrequentRail(lines []line, trips []tripRow, tripStops [][]stopTime, freqs map[int][]freqRow, o Options) {
+	type key struct {
+		stop int32
+		dir  string
+	}
+	deps := make([]map[key][]int32, len(lines))
+	freqBest := make([]float64, len(lines))
+	for r := range freqBest {
+		freqBest[r] = math.Inf(1)
+	}
+	for ti, sts := range tripStops {
+		t := trips[ti]
+		if !lines[t.route].rail || len(sts) == 0 {
+			continue
+		}
+		for _, f := range freqs[ti] {
+			if float64(f.start) < o.WindowEnd && float64(f.end) > o.WindowStart {
+				freqBest[t.route] = math.Min(freqBest[t.route], f.headway)
+			}
+		}
+		if deps[t.route] == nil {
+			deps[t.route] = map[key][]int32{}
+		}
+		for _, s := range sts {
+			if d := s.dep; d >= 0 && float64(d) >= o.WindowStart && float64(d) <= o.WindowEnd {
+				k := key{s.stop, t.dir}
+				deps[t.route][k] = append(deps[t.route][k], d)
+			}
+		}
+	}
+	frequent := make([]bool, len(lines))
+	for r, l := range lines {
+		if !l.rail {
+			continue
+		}
+		best := freqBest[r]
+		for _, ds := range deps[r] {
+			if gaps := headwayGaps(ds); len(gaps) > 0 {
+				best = math.Min(best, median(gaps))
+			}
+		}
+		frequent[r] = best <= o.FrequentHeadway
+	}
+	for ti := range tripStops {
+		if r := trips[ti].route; lines[r].rail && !frequent[r] {
+			tripStops[ti] = nil
+		}
+	}
+}
+
+func readRoutes(fsys fs.FS, types, railTypes []int) ([]line, map[string]int, error) {
 	t, err := openTable(fsys, "routes.txt", true)
 	if err != nil {
 		return nil, nil, err
@@ -499,6 +573,12 @@ func readRoutes(fsys fs.FS, types []int) ([]line, map[string]int, error) {
 	for _, rt := range types {
 		if !isBus(rt) {
 			allowed[rt] = true
+		}
+	}
+	rail := map[int]bool{}
+	for _, rt := range railTypes {
+		if !isBus(rt) && !allowed[rt] {
+			allowed[rt], rail[rt] = true, true
 		}
 	}
 	var lines []line
@@ -524,7 +604,7 @@ func readRoutes(fsys fs.FS, types []int) ([]line, map[string]int, error) {
 			label = id
 		}
 		idx[id] = len(lines)
-		lines = append(lines, line{label: label, color: strings.TrimPrefix(t.get("route_color"), "#")})
+		lines = append(lines, line{label: label, color: strings.TrimPrefix(t.get("route_color"), "#"), rail: rail[rt]})
 	}
 	if len(lines) == 0 {
 		return nil, nil, fmt.Errorf("no subway or metro routes (route_type in %v) in routes.txt", types)
