@@ -153,7 +153,11 @@ func TestRaceGPX(t *testing.T) {
 // courseNet is a fake subway with a station every 0.03 degrees (about
 // 3.3 km) just east of straightGPX. Each hop takes 120 s plus 60 s to get
 // into the system.
-type courseNet struct{ covers bool }
+// With minLat set it only covers points at or north of it.
+type courseNet struct {
+	covers bool
+	minLat float64
+}
 
 func (courseNet) Name() string { return "Test Metro" }
 
@@ -175,7 +179,9 @@ func (courseNet) Rides(i, j int) []travel.Ride {
 
 func (courseNet) MaxSpeed() float64 { return 30 }
 
-func (n courseNet) Covers(geo.LatLon) bool { return n.covers }
+func (n courseNet) Covers(p geo.LatLon) bool {
+	return n.covers || (n.minLat > 0 && p.Lat >= n.minLat)
+}
 
 // prefetchWalk is the straight-line walker that records Prefetch calls.
 type prefetchWalk struct {
@@ -241,6 +247,15 @@ func TestPlanTransitUsesSubway(t *testing.T) {
 	// Start, 11 candidates, and the stations near them.
 	if len(walk.points) < 1+11+4 {
 		t.Fatalf("prefetched %d points", len(walk.points))
+	}
+}
+
+// A point-to-point course that only reaches the subway late on (Boston)
+// still gets subway routing.
+func TestPlanTransitUsesSubwayForPartialCoverage(t *testing.T) {
+	resp := planTransit(t, Config{Networks: []travel.Network{courseNet{minLat: 0.07}}})
+	if !strings.Contains(resp.Routing, "Test Metro") {
+		t.Fatalf("routing %q should name the network", resp.Routing)
 	}
 }
 

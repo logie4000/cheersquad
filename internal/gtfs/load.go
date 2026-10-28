@@ -26,7 +26,7 @@ import (
 // default; times are seconds.
 type Options struct {
 	// RouteTypes are the GTFS route_type values to keep. Default
-	// {1, 400, 401, 402} (subway/metro). Bus types (3, 11, 200-299,
+	// DefaultRouteTypes (subway, metro, light rail). Bus types (3, 11, 200-299,
 	// 700-799, 800) are never kept, even if listed here.
 	RouteTypes []int
 	// WindowStart and WindowEnd bound the departures used to measure
@@ -51,8 +51,10 @@ type Options struct {
 	ServiceDate time.Time
 }
 
-// DefaultRouteTypes are subway and metro route types.
-var DefaultRouteTypes = []int{1, 400, 401, 402}
+// DefaultRouteTypes are subway, metro and light rail route types. Light
+// rail (0, 900) is included because some systems file their subway-like
+// lines under it, such as Boston's Green Line and Mattapan trolley.
+var DefaultRouteTypes = []int{0, 1, 400, 401, 402, 900}
 
 const (
 	walkSpeed      = 1.2  // m/s for walking transfers between stations

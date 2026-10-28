@@ -13,9 +13,9 @@
 # never replaces a working feed. Restart the container afterwards
 # (`docker restart cheersquad`) so the server reloads the feeds.
 #
-# Known feeds (the server only uses their subway/metro lines):
+# Known feeds (the server only uses their subway, metro and light rail lines):
 #   nyc      MTA New York City Transit subway
-#   boston   MBTA (whole system; the T's subway lines are used)
+#   boston   MBTA (whole system; the T's subway and Green Line are used)
 #   chicago  CTA (the 'L' lines are used)
 #   dc       WMATA Metrorail; needs a free API key from
 #            https://developer.wmata.com in WMATA_API_KEY

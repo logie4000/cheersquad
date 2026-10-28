@@ -418,3 +418,33 @@ func TestRidePathsFollowShapes(t *testing.T) {
 		t.Errorf("C->D path = %v, want straight hops through Cross St", g[0].Path)
 	}
 }
+
+// Light rail is kept by default, since some systems file subway-like lines
+// under it (Boston's Green Line); buses still never are.
+func TestLightRailKept(t *testing.T) {
+	dir := t.TempDir()
+	entries, err := os.ReadDir(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(fixture, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Name() == "routes.txt" {
+			b = []byte(strings.Replace(string(b), "401,M,", "0,M,", 1))
+		}
+		if err := os.WriteFile(filepath.Join(dir, e.Name()), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := load(t, dir, Options{})
+	idx := indexes(t, n)
+	if r := n.Rides(idx["W"], idx["F"]); len(r) != 1 || r[0].Line != "M" {
+		t.Fatalf("light rail M should be kept: %+v", r)
+	}
+	if _, ok := idx["Z"]; ok {
+		t.Fatal("bus-only stop Z should not be a station")
+	}
+}
