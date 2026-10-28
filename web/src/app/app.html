@@ -73,11 +73,11 @@
       </label>
       @if (form.controls.mode.value === 'transit') {
         <label>
-          Race day timetable
+          Race day transit schedule
           <select formControlName="raceDay">
             <option value="sunday">Sunday</option>
             <option value="saturday">Saturday</option>
-            <option value="weekday">Weekday (Boston's Monday)</option>
+            <option value="weekday">Weekday</option>
           </select>
         </label>
       }
@@ -88,7 +88,7 @@
         >Max stops (0 = no limit) <input type="number" min="0" formControlName="maxStops"
       /></label>
       <label>
-        Count late miles extra from mile
+        Add a bonus for cheer spots after mile
         <input type="number" min="1" formControlName="lateMilesFrom" placeholder="e.g. 20" />
       </label>
       @if (form.controls.lateMilesFrom.value) {
