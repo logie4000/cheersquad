@@ -144,9 +144,16 @@ def download(dest):
                 shutil.copyfileobj(resp, f)
             return
         except urllib.error.HTTPError as e:
-            if i == len(urls) - 1:
-                raise
-            print(f"  {e.code} {e.reason}; trying the next URL", flush=True)
+            if i < len(urls) - 1:
+                print(f"  {e.code} {e.reason}; trying the next URL", flush=True)
+                continue
+            if e.code == 403:
+                sys.exit(
+                    "TfL refused the download (403). Its firewall blocks some cloud "
+                    "hosts: download " + DEFAULT_URLS[0] + " in a browser and "
+                    "rerun with TFL_TIMETABLES_FILE set to the saved file."
+                )
+            raise
 
 
 def main():

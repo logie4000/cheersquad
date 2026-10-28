@@ -99,11 +99,22 @@ tram, Overground and Elizabeth line files, and converts them with
 `python:3.12-slim` container (`deploy/scripts/tfl_to_gtfs.py`), so it needs
 docker but no Python on the host. The timetables are public, so no TfL key
 is needed. The conversion
-also downloads the NaPTAN stop list (about 100 MB) and takes a while. On
-Windows, from the repo folder in PowerShell:
+also downloads the NaPTAN stop list (about 100 MB) and takes a while.
+
+TfL's firewall answers 403 to some cloud hosts, denali included. Download
+<https://tfl.gov.uk/cdn/static/cms/documents/journey-planner-timetables.zip>
+in a browser instead, copy it to the host (anywhere but the GTFS folder,
+which the server reads every zip in), and point the script at it:
+
+```sh
+TFL_TIMETABLES_FILE=~/journey-planner-timetables.zip deploy/scripts/fetch-gtfs.sh london
+```
+
+On Windows, from the repo folder in PowerShell, with the zip in Downloads:
 
 ```powershell
 docker run --rm -v "${PWD}/gtfs:/gtfs" -v "${PWD}/deploy/scripts:/scripts:ro" `
+  -v "${HOME}/Downloads:/tfl:ro" -e TFL_TIMETABLES_FILE=/tfl/journey-planner-timetables.zip `
   python:3.12-slim sh -c `
   "pip install -q --root-user-action=ignore transx2gtfs==0.6.0 && python /scripts/tfl_to_gtfs.py /gtfs/london.zip"
 ```
