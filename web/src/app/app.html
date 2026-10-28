@@ -11,7 +11,7 @@
         <label>
           Race
           <select [value]="raceId()" (change)="onRace($event); gpxInput.value = ''">
-            <option value="">Upload my own GPX…</option>
+            <option value="">Select a route</option>
             @for (r of races(); track r.id) {
               <option [value]="r.id">{{ r.name }}</option>
             }

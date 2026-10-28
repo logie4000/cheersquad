@@ -61,7 +61,7 @@ describe('App', () => {
       fixture.detectChanges();
       const select = (fixture.nativeElement as HTMLElement).querySelector('select')!;
       const labels = Array.from(select.options).map((o) => o.textContent!.trim());
-      expect(labels).toEqual(['Upload my own GPX…', 'Boston Marathon', 'New York City Marathon']);
+      expect(labels).toEqual(['Select a route', 'Boston Marathon', 'New York City Marathon']);
     });
 
     it('loads the chosen race course from api/races/<id>', async () => {
@@ -101,7 +101,7 @@ describe('App', () => {
       http.expectOne('api/races').flush([]);
       fixture.detectChanges();
       const el = fixture.nativeElement as HTMLElement;
-      expect(el.textContent).not.toContain('Upload my own GPX');
+      expect(el.textContent).not.toContain('Select a route');
       expect(el.querySelector('input[type=file]')).not.toBeNull();
     });
 
@@ -109,7 +109,7 @@ describe('App', () => {
       const fixture = render();
       http.expectOne('api/races').flush('boom', { status: 500, statusText: 'Server Error' });
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Upload my own GPX');
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Select a route');
     });
 
     it('escapes race ids in the GPX URL', () => {
