@@ -85,13 +85,29 @@ the image; fetch them on the host:
 
 ```sh
 cd /srv/cheersquad
-deploy/scripts/fetch-gtfs.sh nyc            # also: boston, chicago, dc, NAME=URL
+deploy/scripts/fetch-gtfs.sh nyc            # also: boston, chicago, dc, london, NAME=URL
 docker restart cheersquad                   # the server loads feeds at startup
 docker logs cheersquad 2>&1 | grep -i gtfs  # check which feeds loaded
 ```
 
 `dc` (WMATA Metrorail) needs a free API key from
 <https://developer.wmata.com>: `WMATA_API_KEY=... deploy/scripts/fetch-gtfs.sh dc`.
+`london` builds a feed from TfL's timetables, which TfL publishes as
+TransXChange rather than GTFS: it downloads them, keeps the Underground, DLR,
+tram, Overground and Elizabeth line files, and converts them with
+[transx2gtfs](https://github.com/HTenkanen/transx2gtfs) inside a
+`python:3.12-slim` container (`deploy/scripts/tfl_to_gtfs.py`), so it needs
+docker but no Python on the host. Register for a free TfL open data key at
+<https://api-portal.tfl.gov.uk> and pass it as `TFL_APP_KEY`. The conversion
+also downloads the NaPTAN stop list (about 100 MB) and takes a while. On
+Windows, from the repo folder in PowerShell:
+
+```powershell
+docker run --rm -v "${PWD}/gtfs:/gtfs" -v "${PWD}/deploy/scripts:/scripts:ro" `
+  -e TFL_APP_KEY=your-key python:3.12-slim sh -c `
+  "pip install -q --root-user-action=ignore transx2gtfs==0.6.0 && python /scripts/tfl_to_gtfs.py /gtfs/london.zip"
+```
+
 Any other agency's feed works with `NAME=URL`. Agencies publish new feeds a
 few times a year (service changes, holidays), so refetch before a race and
 restart; a failed download leaves the old file in place. With no feeds, or
