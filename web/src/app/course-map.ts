@@ -11,6 +11,10 @@ import {
 import * as L from 'leaflet';
 import { EXCLUDE_RADIUS, LatLon, MapMarks, Stop } from './plan';
 
+// Leaflet writes path colors as SVG attributes, which can't read CSS variables,
+// so these are literals from the sweat-equity palette in styles.css:
+// course #c2185b, legs = --accent #2f5bd3, start #00897b, finish = --fg, excluded = --muted.
+
 /**
  * Leaflet map showing the course, the user's marks (start, pinned spots,
  * excluded areas, crossing points) and the planned stops. Clicks are emitted
@@ -19,7 +23,8 @@ import { EXCLUDE_RADIUS, LatLon, MapMarks, Stop } from './plan';
 @Component({
   selector: 'app-course-map',
   template: '<div #map class="map"></div>',
-  styles: ':host { display: block; } .map { height: 100%; min-height: 420px; border-radius: 8px; }',
+  styles:
+    ':host { display: block; } .map { height: 100%; min-height: 420px; border: 1px solid var(--border); border-radius: 8px; }',
 })
 export class CourseMap implements AfterViewInit, OnDestroy {
   readonly course = input<LatLon[]>([]);
@@ -63,11 +68,11 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     this.courseLayer.clearLayers();
     if (points.length < 2) return;
     const latlngs = points.map((p) => L.latLng(p.lat, p.lon));
-    const line = L.polyline(latlngs, { color: '#d6336c', weight: 4 }).addTo(this.courseLayer);
-    L.circleMarker(latlngs[0], { radius: 6, color: '#2b8a3e', fillOpacity: 1 })
+    const line = L.polyline(latlngs, { color: '#c2185b', weight: 4 }).addTo(this.courseLayer);
+    L.circleMarker(latlngs[0], { radius: 6, color: '#00897b', fillOpacity: 1 })
       .bindTooltip('Start line')
       .addTo(this.courseLayer);
-    L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#212529', fillOpacity: 1 })
+    L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#1d1d1f', fillOpacity: 1 })
       .bindTooltip('Finish')
       .addTo(this.courseLayer);
     this.map?.fitBounds(line.getBounds(), { padding: [20, 20] });
@@ -86,7 +91,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
         .addTo(this.markLayer);
     }
     for (const p of m.excluded) {
-      L.circle([p.lat, p.lon], { radius: EXCLUDE_RADIUS, color: '#868e96', dashArray: '4' })
+      L.circle([p.lat, p.lon], { radius: EXCLUDE_RADIUS, color: '#6b6b70', dashArray: '4' })
         .bindTooltip('Excluded')
         .addTo(this.markLayer);
     }
@@ -104,7 +109,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     stops.forEach((s, i) => {
       const here = L.latLng(s.node.pos.lat, s.node.pos.lon);
       if (prev) {
-        L.polyline([prev, here], { color: '#1c7ed6', weight: 3, dashArray: '6 6' }).addTo(
+        L.polyline([prev, here], { color: '#2f5bd3', weight: 3, dashArray: '6 6' }).addTo(
           this.stopLayer,
         );
       }
