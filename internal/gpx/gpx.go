@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/logie4000/cheersquad/internal/geo"
 )
@@ -60,6 +61,42 @@ func Parse(r io.Reader) (*Track, error) {
 		}
 	}
 	return New(pts)
+}
+
+type names struct {
+	Metadata struct {
+		Name string `xml:"name"`
+	} `xml:"metadata"`
+	Tracks []struct {
+		Name string `xml:"name"`
+	} `xml:"trk"`
+	Routes []struct {
+		Name string `xml:"name"`
+	} `xml:"rte"`
+}
+
+// ReadName returns the course name: the metadata name if set, else the first
+// named track, else the first named route, trimmed of whitespace. It returns
+// "" when the file names nothing.
+func ReadName(r io.Reader) (string, error) {
+	var doc names
+	if err := xml.NewDecoder(r).Decode(&doc); err != nil {
+		return "", fmt.Errorf("gpx: %w", err)
+	}
+	if n := strings.TrimSpace(doc.Metadata.Name); n != "" {
+		return n, nil
+	}
+	for _, t := range doc.Tracks {
+		if n := strings.TrimSpace(t.Name); n != "" {
+			return n, nil
+		}
+	}
+	for _, rt := range doc.Routes {
+		if n := strings.TrimSpace(rt.Name); n != "" {
+			return n, nil
+		}
+	}
+	return "", nil
 }
 
 // New builds a Track from points, dropping consecutive duplicates.

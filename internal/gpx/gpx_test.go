@@ -72,3 +72,26 @@ func TestCalibrateAndPointAt(t *testing.T) {
 		t.Fatalf("PointAt clamps high: %+v", got)
 	}
 }
+
+func TestReadName(t *testing.T) {
+	cases := map[string]struct{ doc, want string }{
+		"metadata wins": {`<gpx xmlns="http://www.topografix.com/GPX/1/1"><metadata><name>
+  City Marathon 2026 </name></metadata><trk><name>Track</name></trk></gpx>`, "City Marathon 2026"},
+		"track fallback":  {`<gpx><metadata><name> </name></metadata><trk><name></name></trk><trk><name>Second</name></trk><rte><name>Route</name></rte></gpx>`, "Second"},
+		"route fallback":  {`<gpx><rte><name>Route Only</name></rte></gpx>`, "Route Only"},
+		"no name":         {sample, ""},
+		"point name only": {`<gpx><trk><trkseg><trkpt lat="0" lon="0"><name>pt</name></trkpt></trkseg></trk></gpx>`, ""},
+	}
+	for label, c := range cases {
+		got, err := ReadName(strings.NewReader(c.doc))
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if got != c.want {
+			t.Errorf("%s: got %q want %q", label, got, c.want)
+		}
+	}
+	if _, err := ReadName(strings.NewReader("<gpx><trk>")); err == nil {
+		t.Error("truncated file should error")
+	}
+}

@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { CourseMap } from './course-map';
 import {
@@ -12,6 +12,7 @@ import {
   parseGpxPoints,
   PlanForm,
   PlanResponse,
+  Race,
 } from './plan';
 import { PlanService } from './plan.service';
 
@@ -23,7 +24,7 @@ type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App {
+export class App implements OnInit {
   private readonly api = inject(PlanService);
   private readonly fb = inject(NonNullableFormBuilder);
 
@@ -50,6 +51,8 @@ export class App {
     { value: 'crossing', label: 'Crossing point' },
   ];
 
+  readonly races = signal<Race[]>([]);
+  readonly raceId = signal('');
   readonly gpxFile = signal<File | null>(null);
   readonly course = signal<LatLon[]>([]);
   readonly marks = signal<MapMarks>({ start: null, pinned: [], excluded: [], crossings: [] });
@@ -59,8 +62,38 @@ export class App {
   readonly loading = signal(false);
   readonly stops = computed(() => this.result()?.plan.stops ?? []);
 
-  async onFile(event: Event): Promise<void> {
-    const file = (event.target as HTMLInputElement).files?.[0] ?? null;
+  ngOnInit(): void {
+    // The race list is optional: on failure the dropdown just stays hidden.
+    this.api.races().subscribe({
+      next: (r) => this.races.set(r ?? []),
+      error: () => this.races.set([]),
+    });
+  }
+
+  onFile(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    this.raceId.set('');
+    return this.loadCourse(input.files?.[0] ?? null);
+  }
+
+  onRace(event: Event): void {
+    const id = (event.target as HTMLSelectElement).value;
+    this.raceId.set(id);
+    if (!id) return;
+    this.error.set(null);
+    this.api.raceGpx(id).subscribe({
+      next: (gpx) => {
+        if (this.raceId() !== id) return; // superseded by a later choice
+        void this.loadCourse(new File([gpx], `${id}.gpx`, { type: 'application/gpx+xml' }));
+      },
+      error: (e: Error) => {
+        if (this.raceId() === id) this.error.set(e.message);
+      },
+    });
+  }
+
+  /** Shared by uploads and preloaded races: sets the file and draws its course. */
+  async loadCourse(file: File | null): Promise<void> {
     this.gpxFile.set(file);
     this.result.set(null);
     this.error.set(null);

@@ -14,6 +14,7 @@ import (
 	"github.com/logie4000/cheersquad/internal/gpx"
 	"github.com/logie4000/cheersquad/internal/pace"
 	"github.com/logie4000/cheersquad/internal/planner"
+	"github.com/logie4000/cheersquad/internal/races"
 	"github.com/logie4000/cheersquad/internal/travel"
 )
 
@@ -73,12 +74,28 @@ type Course struct {
 }
 
 // Handler returns the API routes, to be mounted at /api/.
-func Handler() http.Handler {
+func Handler() http.Handler { return newHandler(races.Default) }
+
+func newHandler(catalog *races.Catalog) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("POST /api/plan", handlePlan)
+	mux.HandleFunc("GET /api/races", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(catalog.List())
+	})
+	mux.HandleFunc("GET /api/races/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		data, ok := catalog.GPX(id)
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("unknown race %q", id))
+			return
+		}
+		w.Header().Set("Content-Type", "application/gpx+xml")
+		w.Write(data)
+	})
 	return mux
 }
 
