@@ -68,6 +68,38 @@ IMAGE_TAG=<full sha> deploy/scripts/deploy.sh   # a specific build, e.g. to roll
 
 The SHAs are listed in each Images run's summary.
 
+## Subway routing
+
+In transit mode the planner routes over real subway lines from GTFS
+schedule feeds (the zip files transit agencies publish). Only subway and
+metro lines are used: on marathon day buses are rerouted or stuck behind
+closures, so they aren't a realistic option. Waits come from each line's
+scheduled frequency, not exact departures.
+
+The feeds live in `/srv/cheersquad/gtfs`, which `docker-compose.yml` mounts
+read-only at `/data/gtfs` (`GTFS_DIR`). They aren't committed or baked into
+the image; fetch them on the host:
+
+```sh
+cd /srv/cheersquad
+deploy/scripts/fetch-gtfs.sh nyc            # also: boston, chicago, dc, NAME=URL
+docker restart cheersquad                   # the server loads feeds at startup
+docker logs cheersquad 2>&1 | grep -i gtfs  # check which feeds loaded
+```
+
+`dc` (WMATA Metrorail) needs a free API key from
+<https://developer.wmata.com>: `WMATA_API_KEY=... deploy/scripts/fetch-gtfs.sh dc`.
+Any other agency's feed works with `NAME=URL`. Agencies publish new feeds a
+few times a year (service changes, holidays), so refetch before a race and
+restart; a failed download leaves the old file in place. With no feeds, or
+a course outside every feed's area, transit falls back to the straight-line
+estimate, and the plan says which routing it used.
+
+Walking legs are straight-line estimates by default. For street-network
+walking times, run a self-hosted [OSRM](https://project-osrm.org/) with the
+foot profile and uncomment `OSRM_WALK_URL` in `docker-compose.yml`. It's
+optional.
+
 ## Logs and status
 
 ```sh
