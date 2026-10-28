@@ -1,0 +1,12 @@
+﻿stop_id,stop_name,stop_lat,stop_lon,location_type,parent_station
+A,Alpha,40.0,-74.02,1,
+A1,Alpha platform,40.0,-74.0201,0,A
+X,"Cross, Street",40.0,-74.0,1,
+XR,Cross St Red platform,40.0,-74.0,0,X
+XG,Cross St Green platform,40.0001,-74.0,0,X
+B,Bravo,40.0,-73.98,,
+W,Whiskey,40.0,-73.979,0,
+F,Foxtrot,40.0,-73.96,0,
+C,Charlie,40.02,-74.0,0,
+D,Delta,39.98,-74.0,0,
+Z,Zulu bus stop,40.01,-74.01,0,
