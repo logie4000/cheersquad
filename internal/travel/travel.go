@@ -59,11 +59,7 @@ func (h Haversine) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 	if s <= 0 {
 		return 0, false
 	}
-	detour := h.Detour
-	if detour == 0 {
-		detour = 1.3
-	}
-	return geo.Distance(a, b) * detour / s, true
+	return geo.Distance(a, b) * h.detour() / s, true
 }
 
 // ParseMode validates a mode string.
@@ -125,21 +121,29 @@ type Closures struct {
 }
 
 func (c Closures) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
+	_, _, s, ok := c.route(a, b, m)
+	return s, ok
+}
+
+// route returns the leg's duration and, if it must detour, the crossing
+// point x it goes through (via is true).
+func (c Closures) route(a, b geo.LatLon, m Mode) (x geo.LatLon, via bool, s float64, ok bool) {
 	if !c.crosses(a, b) {
-		return c.Inner.Duration(a, b, m)
+		s, ok = c.Inner.Duration(a, b, m)
+		return a, false, s, ok
 	}
 	best, found := math.Inf(1), false
-	for _, x := range c.Crossings {
-		if c.crosses(a, x) || c.crosses(x, b) {
+	for _, p := range c.Crossings {
+		if c.crosses(a, p) || c.crosses(p, b) {
 			continue
 		}
-		s1, ok1 := c.Inner.Duration(a, x, m)
-		s2, ok2 := c.Inner.Duration(x, b, m)
+		s1, ok1 := c.Inner.Duration(a, p, m)
+		s2, ok2 := c.Inner.Duration(p, b, m)
 		if ok1 && ok2 && s1+s2 < best {
-			best, found = s1+s2, true
+			best, found, x = s1+s2, true, p
 		}
 	}
-	return best, found
+	return x, true, best, found
 }
 
 // crosses reports whether the straight line a-b crosses the course away

@@ -1,0 +1,6 @@
+route_type,route_id,route_long_name,route_short_name,route_color,agency_id
+1,R,Red Line,R,EE352E,TT
+1,G,"Green Line",,00933C,TT
+401,M,Metro M,M,,TT
+3,B1,Crosstown Bus,B1,0000FF,TT
+700,B2,Express Bus,B2,0000FF,TT

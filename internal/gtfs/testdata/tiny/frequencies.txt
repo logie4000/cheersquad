@@ -1,0 +1,2 @@
+trip_id,start_time,end_time,headway_secs
+M_F,06:00:00,22:00:00,360
