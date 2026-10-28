@@ -15,8 +15,8 @@
   --badge-start: #e8710a;
   --badge-pin: #c2185b;
   --badge-cross: #6b6b70;
-  /* Spectating spots: aquamarine, light, so they take dark numbers. */
-  --badge-stop: aquamarine;
+  /* Spectating spots: deepskyblue, light, so they take dark numbers. */
+  --badge-stop: deepskyblue;
 }
 
 @media (prefers-color-scheme: dark) {
