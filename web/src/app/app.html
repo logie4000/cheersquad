@@ -111,12 +111,16 @@
       [course]="course()"
       [marks]="marks()"
       [stops]="stops()"
+      [legs]="legs()"
       (mapClick)="onMapClick($event)"
     />
 
     @if (result(); as r) {
       @if (r.plan.stops.length > 0) {
         <h2>{{ r.plan.sightings }} sighting{{ r.plan.sightings === 1 ? '' : 's' }}</h2>
+        @if (r.routing) {
+          <p class="note routing">Routing: {{ r.routing }}</p>
+        }
         <table>
           <thead>
             <tr>
@@ -130,7 +134,8 @@
           </thead>
           <tbody>
             @for (s of r.plan.stops; track s.node.id; let i = $index) {
-              <tr>
+              @let steps = legs()[i];
+              <tr [class.has-leg]="steps.length > 0">
                 <td>{{ i + 1 }}</td>
                 <td>
                   <a [href]="mapsLink(s.node.pos)" target="_blank" rel="noopener">{{
@@ -147,12 +152,37 @@
                 </td>
                 <td>{{ minutes(s.wait) }}</td>
               </tr>
+              @if (steps.length > 0) {
+                <tr class="leg">
+                  <td></td>
+                  <td colspan="5">
+                    <ol class="steps" [attr.aria-label]="'Getting to stop ' + (i + 1)">
+                      @for (st of steps; track $index) {
+                        <li [title]="stepText(st)">
+                          @if (st.kind === 'subway') {
+                            <span
+                              class="line"
+                              [style.background-color]="lineBg(st)"
+                              [style.color]="lineFg(st)"
+                              >{{ st.line || 'Subway' }}</span
+                            >
+                          }
+                          {{ stepDetail(st) }}
+                        </li>
+                      }
+                    </ol>
+                  </td>
+                </tr>
+              }
             }
           </tbody>
         </table>
         <p class="note">
           Leave times assume the runner is at the slow end of their window, so you can go sooner
-          once you've seen them. Travel times are straight-line estimates for now, not real routes.
+          once you've seen them.
+          @if (!r.routing) {
+            Travel times are straight-line estimates for now, not real routes.
+          }
         </p>
       }
     }

@@ -6,12 +6,18 @@ import {
   formatClock,
   formatMinutes,
   LatLon,
+  legSteps,
+  lineColor,
   MapMarks,
   METERS_PER_MILE,
   parseClock,
   parseGpxPoints,
   PlanForm,
   PlanResponse,
+  Step,
+  stepDetail,
+  stepText,
+  textOn,
 } from './plan';
 import { PlanService } from './plan.service';
 
@@ -58,6 +64,11 @@ export class App {
   readonly error = signal<string | null>(null);
   readonly loading = signal(false);
   readonly stops = computed(() => this.result()?.plan.stops ?? []);
+  /** Index-aligned with stops; empty legs when the server sends none. */
+  readonly legs = computed(() => {
+    const r = this.result();
+    return r ? r.plan.stops.map((_, i) => legSteps(r, i)) : [];
+  });
 
   async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0] ?? null;
@@ -131,6 +142,20 @@ export class App {
   }
   mile(meters: number): string {
     return (meters / METERS_PER_MILE).toFixed(1);
+  }
+  stepText(s: Step): string {
+    return stepText(s);
+  }
+  stepDetail(s: Step): string {
+    return stepDetail(s);
+  }
+  /** Badge colors for a subway line; null leaves the CSS fallback (accent). */
+  lineBg(s: Step): string | null {
+    return lineColor(s.color);
+  }
+  lineFg(s: Step): string | null {
+    const bg = lineColor(s.color);
+    return bg ? textOn(bg) : null;
   }
   mapsLink(p: LatLon): string {
     return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;

@@ -9,11 +9,12 @@ import {
   viewChild,
 } from '@angular/core';
 import * as L from 'leaflet';
-import { EXCLUDE_RADIUS, LatLon, MapMarks, Stop } from './plan';
+import { EXCLUDE_RADIUS, LatLon, lineColor, MapMarks, Step, stepText, Stop } from './plan';
 
 // Leaflet writes path colors as SVG attributes, which can't read CSS variables,
 // so these are literals from the sweat-equity palette in styles.css:
 // course #c2185b, legs = --accent #2f5bd3, start #00897b, finish = --fg, excluded = --muted.
+// Walking steps use --muted #6b6b70; subway steps use the feed's line color.
 
 /**
  * Leaflet map showing the course, the user's marks (start, pinned spots,
@@ -30,6 +31,8 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   readonly course = input<LatLon[]>([]);
   readonly marks = input<MapMarks>({ start: null, pinned: [], excluded: [], crossings: [] });
   readonly stops = input<Stop[]>([]);
+  /** legs[i] is how to get to stops[i]; a missing or empty leg is drawn as a straight line. */
+  readonly legs = input<Step[][]>([]);
   readonly mapClick = output<LatLon>();
 
   private readonly el = viewChild.required<ElementRef<HTMLDivElement>>('map');
@@ -41,7 +44,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   constructor() {
     effect(() => this.drawCourse(this.course()));
     effect(() => this.drawMarks(this.marks()));
-    effect(() => this.drawStops(this.stops()));
+    effect(() => this.drawStops(this.stops(), this.legs()));
   }
 
   ngAfterViewInit(): void {
@@ -102,13 +105,16 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     }
   }
 
-  private drawStops(stops: Stop[]): void {
+  private drawStops(stops: Stop[], legs: Step[][]): void {
     this.stopLayer.clearLayers();
     const start = this.marks().start;
     let prev: L.LatLng | null = start ? L.latLng(start.lat, start.lon) : null;
     stops.forEach((s, i) => {
       const here = L.latLng(s.node.pos.lat, s.node.pos.lon);
-      if (prev) {
+      const steps = legs[i] ?? [];
+      if (steps.length > 0) {
+        for (const st of steps) this.drawStep(st);
+      } else if (prev) {
         L.polyline([prev, here], { color: '#2f5bd3', weight: 3, dashArray: '6 6' }).addTo(
           this.stopLayer,
         );
@@ -118,6 +124,29 @@ export class CourseMap implements AfterViewInit, OnDestroy {
         .addTo(this.stopLayer);
       prev = here;
     });
+  }
+
+  /** Walks are thin dashed gray lines; rides are solid in the line's color. */
+  private drawStep(st: Step): void {
+    const ends: L.LatLngExpression[] = [
+      [st.fromPos.lat, st.fromPos.lon],
+      [st.toPos.lat, st.toPos.lon],
+    ];
+    let style: L.PolylineOptions;
+    switch (st.kind) {
+      case 'walk':
+        style = { color: '#6b6b70', weight: 2, dashArray: '3 5', opacity: 0.9 };
+        break;
+      case 'subway':
+        style = { color: lineColor(st.color) ?? '#2f5bd3', weight: 4, opacity: 0.85 };
+        break;
+      default:
+        style = { color: '#2f5bd3', weight: 3, dashArray: '6 6' };
+    }
+    // Station names come from the feed; set them as text, not as tooltip HTML.
+    const label = document.createElement('span');
+    label.textContent = stepText(st);
+    L.polyline(ends, style).bindTooltip(label).addTo(this.stopLayer);
   }
 }
 

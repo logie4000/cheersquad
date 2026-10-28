@@ -2,11 +2,20 @@ import {
   buildParams,
   formatClock,
   formatMinutes,
+  legSteps,
+  lineColor,
+  lineLabel,
   parseClock,
   parseDuration,
   parseGpxPoints,
   PlanForm,
   PlanParams,
+  PlanResponse,
+  Step,
+  stepDetail,
+  stepMinutes,
+  stepText,
+  textOn,
 } from './plan';
 
 const form: PlanForm = {
@@ -86,5 +95,63 @@ describe('parseGpxPoints', () => {
 
   it('returns nothing for invalid XML', () => {
     expect(parseGpxPoints('<gpx')).toEqual([]);
+  });
+});
+
+describe('leg steps', () => {
+  const a = { lat: 40.78, lon: -73.98 };
+  const b = { lat: 40.74, lon: -74.0 };
+  const walk: Step = { kind: 'walk', fromPos: a, toPos: b, seconds: 370 };
+  const ride: Step = {
+    kind: 'subway',
+    line: '1',
+    color: 'EE352E',
+    from: '72 St',
+    to: '14 St',
+    fromPos: a,
+    toPos: b,
+    seconds: 540,
+  };
+
+  it('describes steps', () => {
+    expect(stepText(walk)).toBe('Walk 6 min');
+    expect(stepText(ride)).toBe('1 train · 72 St → 14 St · 9 min');
+    expect(stepDetail(ride)).toBe('72 St → 14 St · 9 min');
+    expect(stepText({ ...ride, line: 'Red Line', from: undefined, to: undefined })).toBe(
+      'Red Line · 9 min',
+    );
+    expect(stepText({ ...walk, kind: 'bike', seconds: 20 })).toBe('Bike <1 min');
+    expect(stepText({ ...walk, kind: 'drive', seconds: 3900 })).toBe('Drive 1 h 05 min');
+  });
+
+  it('names lines', () => {
+    expect(lineLabel('A')).toBe('A train');
+    expect(lineLabel('Orange Line')).toBe('Orange Line');
+    expect(lineLabel(undefined)).toBe('Subway');
+    expect(stepMinutes(0)).toBe('<1 min');
+  });
+
+  it('normalizes line colors and picks readable text', () => {
+    expect(lineColor('EE352E')).toBe('#ee352e');
+    expect(lineColor('#fc0')).toBe('#ffcc00');
+    expect(lineColor('')).toBeNull();
+    expect(lineColor('nope')).toBeNull();
+    expect(textOn('#fccc0a')).toBe('#000000'); // MTA yellow
+    // Mid-tone reds read better in black (5.3:1) than white (3.9:1).
+    expect(textOn('#ee352e')).toBe('#000000'); // MTA red
+    expect(textOn('#0039a6')).toBe('#ffffff'); // MTA blue
+    expect(textOn('#ffffff')).toBe('#000000');
+  });
+
+  it('tolerates responses without legs', () => {
+    const r = {
+      course: { points: [], length: 0 },
+      mode: 'transit',
+      candidates: 0,
+      plan: { stops: [], sightings: 0, value: 0 },
+    } as PlanResponse;
+    expect(legSteps(r, 0)).toEqual([]);
+    expect(legSteps({ ...r, legs: [[walk]] }, 0)).toEqual([walk]);
+    expect(legSteps({ ...r, legs: [[walk]] }, 3)).toEqual([]);
   });
 });
