@@ -22,7 +22,7 @@
 #            https://developer.wmata.com in WMATA_API_KEY
 #   london   TfL Underground, DLR, trams, Overground and Elizabeth line,
 #            converted from TfL's TransXChange timetables in a python
-#            container (needs docker); a TfL app key goes in TFL_APP_KEY
+#            container (needs docker; no TfL key needed)
 set -euo pipefail
 
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"

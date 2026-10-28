@@ -7,8 +7,9 @@ and converts the rest with transx2gtfs (https://github.com/HTenkanen/transx2gtfs
     python tfl_to_gtfs.py OUT.zip
 
 The TfL archive is downloaded from TFL_TIMETABLES_URL (default: TfL's
-journey planner timetables feed), with TFL_APP_KEY appended as app_key when
-set, or read from TFL_TIMETABLES_FILE if that points at a local copy.
+journey planner timetables, which need no key), with TFL_APP_KEY appended
+as app_key when set, or read from TFL_TIMETABLES_FILE if that points at a
+local copy.
 fetch-gtfs.sh runs this inside a python container; see deploy/README.md.
 """
 
@@ -18,11 +19,20 @@ import re
 import shutil
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 
-DEFAULT_URL = "https://tfl.gov.uk/tfl/syndication/feeds/journey-planner-timetables.zip"
+# TfL's CDN copy is public; the older syndication URL needs app_id and
+# app_key and answers 403 without them.
+DEFAULT_URLS = [
+    "https://tfl.gov.uk/cdn/static/cms/documents/journey-planner-timetables.zip",
+    "https://tfl.gov.uk/tfl/syndication/feeds/journey-planner-timetables.zip",
+]
+
+# tfl.gov.uk refuses Python's default User-Agent.
+USER_AGENT = "cheersquad-fetch-gtfs/1.0 (+https://github.com/logie4000/cheersquad)"
 
 # TransXChange modes worth converting; the server then keeps light rail,
 # metro and rail that runs often enough.
@@ -119,15 +129,24 @@ def download(dest):
     if local:
         shutil.copyfile(local, dest)
         return
-    url = os.environ.get("TFL_TIMETABLES_URL") or DEFAULT_URL
+    override = os.environ.get("TFL_TIMETABLES_URL")
+    urls = [override] if override else DEFAULT_URLS
     key = os.environ.get("TFL_APP_KEY")
-    shown = url
-    if key:
-        sep = "&" if urllib.parse.urlparse(url).query else "?"
-        url += sep + urllib.parse.urlencode({"app_key": key})
-    print("downloading", shown, flush=True)
-    with urllib.request.urlopen(url, timeout=600) as resp, open(dest, "wb") as f:
-        shutil.copyfileobj(resp, f)
+    for i, url in enumerate(urls):
+        shown = url
+        if key and "/cdn/" not in url:
+            sep = "&" if urllib.parse.urlparse(url).query else "?"
+            url += sep + urllib.parse.urlencode({"app_key": key})
+        print("downloading", shown, flush=True)
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=600) as resp, open(dest, "wb") as f:
+                shutil.copyfileobj(resp, f)
+            return
+        except urllib.error.HTTPError as e:
+            if i == len(urls) - 1:
+                raise
+            print(f"  {e.code} {e.reason}; trying the next URL", flush=True)
 
 
 def main():
