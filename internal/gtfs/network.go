@@ -37,6 +37,9 @@ type Network struct {
 	next     [][]int32 // per edge: edges a train continues onto
 	out      [][]int32 // per station: edges leaving it
 	walk     [][]walkLink
+	// paths[e] is edge e's track geometry from shapes.txt, or nil. paths
+	// itself is nil when the feed has no shapes.
+	paths    [][]geo.LatLon
 	entry    float64
 	transfer float64
 
@@ -114,7 +117,30 @@ func (n *Network) Rides(i, j int) []travel.Ride {
 		r.To = int(e.to)
 		r.Seconds += e.ride
 	}
+	if n.paths != nil {
+		r := -1
+		for k := len(states) - 1; k >= 0; k-- {
+			if boarded[k] {
+				r++
+			}
+			rides[r].Path = n.appendPath(rides[r].Path, states[k])
+		}
+	}
 	return rides
+}
+
+// appendPath extends a ride's track with edge e's geometry, or a straight
+// line between its stations when the feed has no shape for it.
+func (n *Network) appendPath(path []geo.LatLon, e int32) []geo.LatLon {
+	seg := n.paths[e]
+	if len(seg) < 2 {
+		ed := n.edges[e]
+		seg = []geo.LatLon{n.stations[ed.from].Pos, n.stations[ed.to].Pos}
+	}
+	if len(path) > 0 && path[len(path)-1] == seg[0] {
+		seg = seg[1:]
+	}
+	return append(path, seg...)
 }
 
 func (n *Network) MaxSpeed() float64 { return n.maxSpeed }

@@ -21,6 +21,8 @@ type Ride struct {
 	To    int    `json:"-"`
 	// Via lists the stations the train stops at between From and To.
 	Via []int `json:"-"`
+	// Path is the track from From to To, if the feed has shapes.
+	Path []geo.LatLon `json:"-"`
 	// Seconds includes the wait for the train and the ride itself.
 	Seconds float64 `json:"seconds"`
 }
@@ -71,8 +73,10 @@ type Step struct {
 	ToPos   geo.LatLon `json:"toPos"`
 	// Via lists the stops between From and To on subway steps, so the map
 	// can draw the ride along the line instead of as a straight line.
-	Via     []Stop  `json:"via,omitempty"`
-	Seconds float64 `json:"seconds"`
+	Via []Stop `json:"via,omitempty"`
+	// Path is the track geometry of a subway step, if known.
+	Path    []geo.LatLon `json:"path,omitempty"`
+	Seconds float64      `json:"seconds"`
 }
 
 // Stop is an intermediate station on a subway step.

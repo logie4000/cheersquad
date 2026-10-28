@@ -152,7 +152,12 @@ type tripRow struct {
 	route   int
 	service string
 	dir     string
+	shape   string
 }
+
+// edgeSample is a trip that rides an edge, used to cut the edge's track
+// geometry out of the trip's shape.
+type edgeSample struct{ trip, k int32 }
 
 type stopTime struct {
 	seq      int
@@ -229,6 +234,8 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 	var keys []edgeKey
 	var obs [][]float64
 	var edgeDirs [][]depKey
+	var samples []edgeSample
+	shaped := map[int32][]stopTime{} // merged stops of trips sampled for geometry
 	cont := map[[2]int32]bool{}
 	deps := map[depKey][]int32{}
 	freqHeadways := map[depKey][]float64{}
@@ -249,6 +256,11 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 				keys = append(keys, ek)
 				obs = append(obs, nil)
 				edgeDirs = append(edgeDirs, nil)
+				samples = append(samples, edgeSample{-1, -1})
+			}
+			if samples[e].trip < 0 && t.shape != "" {
+				samples[e] = edgeSample{int32(ti), int32(k)}
+				shaped[int32(ti)] = merged
 			}
 			if a.dep >= 0 && b.arr >= 0 && b.arr >= a.dep {
 				obs[e] = append(obs[e], float64(b.arr-a.dep))
@@ -359,6 +371,20 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 		return nil, err
 	}
 	net.walk = walk
+
+	if len(shaped) > 0 {
+		need := map[string]bool{}
+		for ti := range shaped {
+			need[trips[ti].shape] = true
+		}
+		shapes, err := readShapes(fsys, need)
+		if err != nil {
+			return nil, err
+		}
+		net.paths = edgePaths(samples, shaped, trips, shapes, func(stop int32) geo.LatLon {
+			return stations[stationOf[stop]].Pos
+		})
+	}
 
 	net.solve()
 	return net, nil
@@ -530,7 +556,7 @@ func readTrips(fsys fs.FS, routeIdx map[string]int) ([]tripRow, map[string]int, 
 			continue
 		}
 		idx[t.get("trip_id")] = len(trips)
-		trips = append(trips, tripRow{route: r, service: t.get("service_id"), dir: t.get("direction_id")})
+		trips = append(trips, tripRow{route: r, service: t.get("service_id"), dir: t.get("direction_id"), shape: t.get("shape_id")})
 	}
 	if len(trips) == 0 {
 		return nil, nil, errors.New("no trips for subway routes in trips.txt")

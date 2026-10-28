@@ -145,12 +145,16 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   /** Walks are dashed black lines; rides are solid in the line's color. */
   private drawStep(st: Step): void {
     const via = st.via ?? [];
-    // Rides follow the line through each stop the train makes on the way.
-    const ends: L.LatLngExpression[] = [
-      [st.fromPos.lat, st.fromPos.lon],
-      ...via.map((v): L.LatLngExpression => [v.pos.lat, v.pos.lon]),
-      [st.toPos.lat, st.toPos.lon],
-    ];
+    // Rides follow the track when the feed has shapes, otherwise a straight
+    // line through each stop the train makes on the way.
+    const track = st.path && st.path.length >= 2 ? st.path : null;
+    const ends: L.LatLngExpression[] = track
+      ? track.map((p): L.LatLngExpression => [p.lat, p.lon])
+      : [
+          [st.fromPos.lat, st.fromPos.lon],
+          ...via.map((v): L.LatLngExpression => [v.pos.lat, v.pos.lon]),
+          [st.toPos.lat, st.toPos.lon],
+        ];
     let style: L.PolylineOptions;
     switch (st.kind) {
       case 'walk':

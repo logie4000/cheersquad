@@ -215,7 +215,7 @@ func (s *Subway) Steps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 		subway = append(subway, Step{
 			Kind: StepSubway, Line: r.Line, Color: r.Color,
 			From: from.Name, To: to.Name, FromPos: from.Pos, ToPos: to.Pos,
-			Via: via, Seconds: r.Seconds,
+			Via: via, Path: r.Path, Seconds: r.Seconds,
 		})
 		sum += r.Seconds
 	}

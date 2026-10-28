@@ -1,0 +1,6 @@
+shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence
+RE,40.0,-74.0201,1
+RE,40.005,-74.01,2
+RE,40.0,-74.0,3
+RE,40.0,-73.99,4
+RE,40.0,-73.98,5

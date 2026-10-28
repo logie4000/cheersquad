@@ -68,6 +68,8 @@ export interface Step {
   toPos: LatLon;
   /** Stations the train stops at between from and to (subway steps only). */
   via?: { name: string; pos: LatLon }[];
+  /** Track geometry of a subway ride, when the feed has shapes. */
+  path?: LatLon[];
   seconds: number;
 }
 

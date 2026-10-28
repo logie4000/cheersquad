@@ -388,3 +388,33 @@ func TestParseTime(t *testing.T) {
 		}
 	}
 }
+
+func TestRidePathsFollowShapes(t *testing.T) {
+	n := load(t, fixture, Options{})
+	idx := indexes(t, n)
+	r := n.Rides(idx["A"], idx["B"])
+	if len(r) != 1 {
+		t.Fatalf("A->B rides = %+v", r)
+	}
+	p := r[0].Path
+	// The RE shape bends north between Alpha and Cross St.
+	bend := geo.LatLon{Lat: 40.005, Lon: -74.01}
+	found := false
+	for _, q := range p {
+		if q == bend {
+			found = true
+		}
+	}
+	if !found || len(p) < 4 {
+		t.Fatalf("A->B path should follow the shape through the bend: %v", p)
+	}
+	st := n.Stations()
+	if geo.Distance(p[0], st[idx["A"]].Pos) > 20 || geo.Distance(p[len(p)-1], st[idx["B"]].Pos) > 20 {
+		t.Errorf("path ends %v..%v should sit at Alpha and Bravo", p[0], p[len(p)-1])
+	}
+	// Green has no shape, so its rides fall back to straight station hops.
+	g := n.Rides(idx["C"], idx["D"])
+	if len(g[0].Path) != 3 || g[0].Path[0] != st[idx["C"]].Pos || g[0].Path[2] != st[idx["D"]].Pos {
+		t.Errorf("C->D path = %v, want straight hops through Cross St", g[0].Path)
+	}
+}
