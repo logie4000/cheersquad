@@ -55,7 +55,7 @@ export interface Stop {
   wait: number;
 }
 
-export type StepKind = 'walk' | 'subway' | 'bike' | 'drive';
+export type StepKind = 'walk' | 'subway' | 'transit' | 'bike' | 'drive';
 
 /** One part of a travel leg, e.g. a walk to a station or a subway ride. */
 export interface Step {
@@ -143,6 +143,7 @@ export function lineLabel(line: string | undefined): string {
 const STEP_VERB: Record<StepKind, string> = {
   walk: 'Walk',
   subway: 'Ride',
+  transit: 'Transit',
   bike: 'Bike',
   drive: 'Drive',
 };
