@@ -20,12 +20,15 @@
 #   chicago  CTA (the 'L' lines are used)
 #   dc       WMATA Metrorail; needs a free API key from
 #            https://developer.wmata.com in WMATA_API_KEY
+#   london   TfL Underground, DLR, trams, Overground and Elizabeth line,
+#            converted from TfL's TransXChange timetables in a python
+#            container (needs docker); a TfL app key goes in TFL_APP_KEY
 set -euo pipefail
 
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"
 
 usage() {
-  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -73,6 +76,17 @@ for arg in "$@"; do
       fetch dc https://api.wmata.com/gtfs/rail-gtfs-static.zip \
         -H @<(printf 'api_key: %s\n' "$WMATA_API_KEY") || status=1
       ;;
+    london)
+      # TfL publishes TransXChange, not GTFS; convert it with transx2gtfs.
+      scripts=$(cd "$(dirname "$0")" && pwd)
+      out=$(cd "$dir" && pwd)
+      echo "fetching london from TfL and converting (this takes a while)"
+      docker run --rm -v "$out:/gtfs" -v "$scripts:/scripts:ro" \
+        -e TFL_APP_KEY -e TFL_TIMETABLES_URL \
+        python:3.12-slim sh -c \
+        'pip install -q --root-user-action=ignore transx2gtfs==0.6.0 && python /scripts/tfl_to_gtfs.py /gtfs/london.zip' ||
+        status=1
+      ;;
     *=http://* | *=https://*)
       name=${arg%%=*}
       if ! [[ $name =~ ^[A-Za-z0-9_-]+$ ]]; then
@@ -89,7 +103,7 @@ for arg in "$@"; do
       fetch "${host//[^A-Za-z0-9_-]/_}" "$arg" || status=1
       ;;
     *)
-      echo "unknown feed '$arg'; known: nyc boston chicago dc, or NAME=URL" >&2
+      echo "unknown feed '$arg'; known: nyc boston chicago dc london, or NAME=URL" >&2
       status=1
       ;;
   esac
