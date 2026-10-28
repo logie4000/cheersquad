@@ -4,11 +4,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/logie4000/cheersquad/internal/candidates"
 	"github.com/logie4000/cheersquad/internal/geo"
@@ -43,6 +45,21 @@ const (
 	// MaxConcurrentPlans is how many plans may run at once; more get a 503
 	// rather than queueing up CPU and memory.
 	MaxConcurrentPlans = 4
+	// MaxFinishSeconds is 48 hours; slower than that is not a real pace and
+	// would make every pair of spots reachable.
+	MaxFinishSeconds = 48 * 3600
+	// MaxMileWeights caps the per-mile weight map.
+	MaxMileWeights = 200
+	// MaxPrefetchPoints is the most points whose pairwise walking times are
+	// fetched up front; beyond it they are fetched on demand, after the
+	// planner's straight-line prefilter.
+	MaxPrefetchPoints = 1500
+	// MaxClosurePoints is how finely the course is kept for checking whether
+	// a leg crosses it (every check walks all of it).
+	MaxClosurePoints = 2000
+	// PlanTimeout stops a plan that runs too long, within the server's 60s
+	// write timeout.
+	PlanTimeout = 30 * time.Second
 )
 
 // Runner is the runner half of a plan request.
@@ -216,7 +233,9 @@ func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("params: %w", err))
 		return
 	}
-	resp, err := Plan(track, p, cfg)
+	ctx, cancel := context.WithTimeout(r.Context(), PlanTimeout)
+	defer cancel()
+	resp, err := Plan(ctx, track, p, cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -225,8 +244,9 @@ func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// Plan runs the whole pipeline on a parsed track.
-func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
+// Plan runs the whole pipeline on a parsed track. When ctx ends, travel
+// lookups stop and Plan returns an error.
+func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Response, error) {
 	mode, err := travel.ParseMode(string(p.Spectator.Mode))
 	if err != nil {
 		return nil, err
@@ -272,7 +292,7 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
-		walk = travel.Closures{Inner: walk, Course: track.Points, Crossings: p.Crossings}
+		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
 	}
 	var provider travel.Provider = walk
 	if rt.net != nil {
@@ -286,10 +306,18 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		if s, ok := provider.(*travel.Subway); ok {
 			pts = append(pts, s.StationsNear(pts)...)
 		}
-		pf.Prefetch(append(pts, p.Crossings...))
+		pts = append(pts, p.Crossings...)
+		if len(pts) <= MaxPrefetchPoints {
+			pf.Prefetch(pts)
+		}
 	}
 	provider = &travel.Cached{Inner: provider}
-	travelFn := func(a, b geo.LatLon) (float64, bool) { return provider.Duration(a, b, mode) }
+	travelFn := func(a, b geo.LatLon) (float64, bool) {
+		if ctx.Err() != nil {
+			return 0, false
+		}
+		return provider.Duration(a, b, mode)
+	}
 
 	plan := planner.Solve(
 		planner.Start{Pos: p.Spectator.Start, Time: p.Spectator.StartTimeSeconds},
@@ -303,6 +331,9 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 			StopPenalty: p.StopPenalty,
 		},
 	)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("planning took longer than %s; try wider spacing or fewer crossings", PlanTimeout)
+	}
 	legs := make([][]travel.Step, len(plan.Stops))
 	prev := p.Spectator.Start
 	for i, st := range plan.Stops {
@@ -339,6 +370,12 @@ func checkLimits(track *gpx.Track, p Params) error {
 	if p.SpacingMeters > 0 && p.SpacingMeters < MinSpacingMeters {
 		return fmt.Errorf("spacing must be at least %d m", MinSpacingMeters)
 	}
+	if p.Runner.FinishSeconds > MaxFinishSeconds {
+		return fmt.Errorf("finish time must be under %d hours", MaxFinishSeconds/3600)
+	}
+	if len(p.MileWeights) > MaxMileWeights {
+		return fmt.Errorf("at most %d mile weights", MaxMileWeights)
+	}
 	if p.MaxStops < 0 || p.MaxStops > MaxStopsLimit {
 		return fmt.Errorf("max stops must be between 0 (no limit) and %d", MaxStopsLimit)
 	}
@@ -357,6 +394,20 @@ func checkLimits(track *gpx.Track, p Params) error {
 		}
 	}
 	return nil
+}
+
+// thin keeps at most max points of a polyline, evenly by index, always
+// keeping the last.
+func thin(pts []geo.LatLon, max int) []geo.LatLon {
+	if len(pts) <= max {
+		return pts
+	}
+	step := (len(pts) + max - 2) / (max - 1)
+	var out []geo.LatLon
+	for i := 0; i < len(pts)-1; i += step {
+		out = append(out, pts[i])
+	}
+	return append(out, pts[len(pts)-1])
 }
 
 // routing is the travel setup chosen for one request.

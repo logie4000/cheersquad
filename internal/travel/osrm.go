@@ -36,6 +36,10 @@ type OSRM struct {
 	// request has at most 2*ChunkSize locations. Zero means 50, which fits
 	// OSRM's default --max-table-size of 100.
 	ChunkSize int
+	// MaxMemo caps cached pairs; the cache is shared by every request, so
+	// when full it is cleared rather than growing without bound. Zero means
+	// 2M pairs (roughly 200 MB).
+	MaxMemo int
 
 	mu        sync.Mutex
 	memo      map[[2]geo.LatLon]cacheVal
@@ -98,11 +102,21 @@ func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 
 func (o *OSRM) store(k [2]geo.LatLon, v cacheVal) {
 	o.mu.Lock()
-	if o.memo == nil {
-		o.memo = map[[2]geo.LatLon]cacheVal{}
-	}
+	o.makeRoom(1)
 	o.memo[k] = v
 	o.mu.Unlock()
+}
+
+// makeRoom clears the memo if adding n pairs would pass MaxMemo. The
+// caller holds o.mu.
+func (o *OSRM) makeRoom(n int) {
+	limit := o.MaxMemo
+	if limit <= 0 {
+		limit = 2_000_000
+	}
+	if o.memo == nil || len(o.memo)+n > limit {
+		o.memo = map[[2]geo.LatLon]cacheVal{}
+	}
 }
 
 // fail logs the first error and pauses OSRM for a while.
@@ -233,9 +247,7 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.memo == nil {
-		o.memo = map[[2]geo.LatLon]cacheVal{}
-	}
+	o.makeRoom(len(src) * len(dst))
 	for i, row := range r.Durations {
 		if len(row) != len(dst) {
 			return fmt.Errorf("osrm table: row of %d for %d destinations", len(row), len(dst))
