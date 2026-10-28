@@ -2,3 +2,4 @@
 # GTFS feeds are downloaded on the host (deploy/scripts/fetch-gtfs.sh).
 gtfs/*
 !gtfs/.gitkeep
+__pycache__/

@@ -97,14 +97,14 @@ TransXChange rather than GTFS: it downloads them, keeps the Underground, DLR,
 tram, Overground and Elizabeth line files, and converts them with
 [transx2gtfs](https://github.com/HTenkanen/transx2gtfs) inside a
 `python:3.12-slim` container (`deploy/scripts/tfl_to_gtfs.py`), so it needs
-docker but no Python on the host. Register for a free TfL open data key at
-<https://api-portal.tfl.gov.uk> and pass it as `TFL_APP_KEY`. The conversion
+docker but no Python on the host. The timetables are public, so no TfL key
+is needed. The conversion
 also downloads the NaPTAN stop list (about 100 MB) and takes a while. On
 Windows, from the repo folder in PowerShell:
 
 ```powershell
 docker run --rm -v "${PWD}/gtfs:/gtfs" -v "${PWD}/deploy/scripts:/scripts:ro" `
-  -e TFL_APP_KEY=your-key python:3.12-slim sh -c `
+  python:3.12-slim sh -c `
   "pip install -q --root-user-action=ignore transx2gtfs==0.6.0 && python /scripts/tfl_to_gtfs.py /gtfs/london.zip"
 ```
 
