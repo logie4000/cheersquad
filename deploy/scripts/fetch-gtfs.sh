@@ -20,7 +20,7 @@
 #   chicago  CTA (the 'L' lines are used)
 #   dc       WMATA Metrorail; needs a free API key from
 #            https://developer.wmata.com in WMATA_API_KEY
-#   london   TfL Underground, DLR, trams, Overground and Elizabeth line,
+#   london   TfL Underground, DLR and trams,
 #            converted from TfL's TransXChange timetables in a python
 #            container (needs docker; no TfL key needed). If TfL
 #            refuses the download (403 from cloud hosts), download

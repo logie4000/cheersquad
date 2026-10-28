@@ -93,8 +93,9 @@ docker logs cheersquad 2>&1 | grep -i gtfs  # check which feeds loaded
 `dc` (WMATA Metrorail) needs a free API key from
 <https://developer.wmata.com>: `WMATA_API_KEY=... deploy/scripts/fetch-gtfs.sh dc`.
 `london` builds a feed from TfL's timetables, which TfL publishes as
-TransXChange rather than GTFS: it downloads them, keeps the Underground, DLR,
-tram, Overground and Elizabeth line files, and converts them with
+TransXChange rather than GTFS: it downloads them, keeps the Underground, DLR
+and tram files (TfL's timetables leave out the Overground and Elizabeth
+line), and converts them with
 [transx2gtfs](https://github.com/HTenkanen/transx2gtfs) inside a
 `python:3.12-slim` container (`deploy/scripts/tfl_to_gtfs.py`), so it needs
 docker but no Python on the host. The timetables are public, so no TfL key
