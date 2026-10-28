@@ -14,6 +14,7 @@ import (
 	"github.com/logie4000/cheersquad/internal/gpx"
 	"github.com/logie4000/cheersquad/internal/pace"
 	"github.com/logie4000/cheersquad/internal/planner"
+	"github.com/logie4000/cheersquad/internal/races"
 	"github.com/logie4000/cheersquad/internal/travel"
 )
 
@@ -80,6 +81,8 @@ type Config struct {
 	// Nil means the straight-line stub. If it is a travel.Prefetcher it is
 	// warmed with every point a plan may ask about before solving.
 	Walk travel.Provider
+	// Races are the preloaded courses; nil means the embedded ones.
+	Races *races.Catalog
 }
 
 // Course is the (possibly calibrated) course for drawing on the map.
@@ -90,12 +93,30 @@ type Course struct {
 
 // Handler returns the API routes, to be mounted at /api/.
 func Handler(cfg Config) http.Handler {
+	catalog := cfg.Races
+	if catalog == nil {
+		catalog = races.Default
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("POST /api/plan", func(w http.ResponseWriter, r *http.Request) {
 		handlePlan(w, r, cfg)
+	})
+	mux.HandleFunc("GET /api/races", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(catalog.List())
+	})
+	mux.HandleFunc("GET /api/races/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		data, ok := catalog.GPX(id)
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("unknown race %q", id))
+			return
+		}
+		w.Header().Set("Content-Type", "application/gpx+xml")
+		w.Write(data)
 	})
 	return mux
 }

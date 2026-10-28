@@ -7,8 +7,20 @@
   <form [formGroup]="form" (ngSubmit)="submit()" class="panel">
     <fieldset>
       <legend>Course</legend>
+      @if (races().length > 0) {
+        <label>
+          Race
+          <select [value]="raceId()" (change)="onRace($event); gpxInput.value = ''">
+            <option value="">Select a route</option>
+            @for (r of races(); track r.id) {
+              <option [value]="r.id">{{ r.name }}</option>
+            }
+          </select>
+        </label>
+      }
       <label
-        >GPX file <input type="file" accept=".gpx,application/gpx+xml" (change)="onFile($event)"
+        >{{ races().length > 0 ? 'Or upload a GPX file' : 'GPX file' }}
+        <input #gpxInput type="file" accept=".gpx,application/gpx+xml" (change)="onFile($event)"
       /></label>
       <label>
         Official distance

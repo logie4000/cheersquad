@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/logie4000/cheersquad/internal/geo"
+	"github.com/logie4000/cheersquad/internal/races"
 	"github.com/logie4000/cheersquad/internal/travel"
 )
 
@@ -97,6 +99,54 @@ func TestHealthz(t *testing.T) {
 	Handler(Config{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/healthz", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func racesHandler(t *testing.T, fsys fstest.MapFS) http.Handler {
+	t.Helper()
+	c, err := races.NewCatalog(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Handler(Config{Races: c})
+}
+
+func get(h http.Handler, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	return rec
+}
+
+func TestRacesList(t *testing.T) {
+	h := racesHandler(t, fstest.MapFS{
+		"b.gpx": {Data: []byte(`<gpx><metadata><name>Beta Marathon</name></metadata></gpx>`)},
+		"a.gpx": {Data: []byte(straightGPX)},
+	})
+	rec := get(h, "/api/races")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("status %d type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if got, want := strings.TrimSpace(rec.Body.String()), `[{"id":"a","name":"a"},{"id":"b","name":"Beta Marathon"}]`; got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+
+	empty := get(racesHandler(t, fstest.MapFS{}), "/api/races")
+	if got := strings.TrimSpace(empty.Body.String()); got != "[]" {
+		t.Fatalf("empty catalog should list [], got %s", got)
+	}
+}
+
+func TestRaceGPX(t *testing.T) {
+	h := racesHandler(t, fstest.MapFS{"a.gpx": {Data: []byte(straightGPX)}})
+	rec := get(h, "/api/races/a")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/gpx+xml" || rec.Body.String() != straightGPX {
+		t.Fatalf("status %d type %q body %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body)
+	}
+	for _, path := range []string{"/api/races/missing", "/api/races/a.gpx", "/api/races/..%2Fa"} {
+		rec := get(h, path)
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"error"`) {
+			t.Errorf("%s: status %d body %s", path, rec.Code, rec.Body)
+		}
 	}
 }
 

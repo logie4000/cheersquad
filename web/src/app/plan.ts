@@ -84,6 +84,12 @@ export interface PlanResponse {
   legs?: Step[][];
 }
 
+/** A preloaded race course from GET api/races. */
+export interface Race {
+  id: string;
+  name: string;
+}
+
 export const METERS_PER_MILE = 1609.344;
 
 /** Parses "h:mm:ss", "h:mm" or "mm" into seconds; NaN if malformed. */
