@@ -13,8 +13,11 @@ import { EXCLUDE_RADIUS, LatLon, lineColor, MapMarks, Step, stepText, Stop } fro
 
 // Leaflet writes path colors as SVG attributes, which can't read CSS variables,
 // so these are literals from the sweat-equity palette in styles.css:
-// course #c2185b, legs = --accent #2f5bd3, start #00897b, finish = --fg, excluded = --muted.
-// Walking steps use --muted #6b6b70; subway steps use the feed's line color.
+// start #00897b, finish and non-subway legs = --fg, excluded and walks = --muted.
+// Subway steps use the feed's line color, so the course is a bright blue on a
+// white casing over grayscale tiles to stay distinct from transit colors.
+const COURSE = '#0a5cff';
+const LEG = '#1d1d1f';
 
 /**
  * Leaflet map showing the course, the user's marks (start, pinned spots,
@@ -49,11 +52,16 @@ export class CourseMap implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     this.map = L.map(this.el().nativeElement, { center: [39.5, -98.35], zoom: 4 });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(this.map);
+    const osm = (className: string) =>
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        className,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      });
+    // The same OSM tiles, desaturated by CSS (styles.css) so line colors stand out.
+    const gray = osm('tiles-gray').addTo(this.map);
+    L.control.layers({ 'Gray map': gray, 'Color map': osm('tiles-color') }).addTo(this.map);
     this.courseLayer.addTo(this.map);
     this.stopLayer.addTo(this.map);
     this.markLayer.addTo(this.map);
@@ -71,7 +79,8 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     this.courseLayer.clearLayers();
     if (points.length < 2) return;
     const latlngs = points.map((p) => L.latLng(p.lat, p.lon));
-    const line = L.polyline(latlngs, { color: '#c2185b', weight: 4 }).addTo(this.courseLayer);
+    L.polyline(latlngs, { color: '#ffffff', weight: 8, opacity: 0.9 }).addTo(this.courseLayer);
+    const line = L.polyline(latlngs, { color: COURSE, weight: 4 }).addTo(this.courseLayer);
     L.circleMarker(latlngs[0], { radius: 6, color: '#00897b', fillOpacity: 1 })
       .bindTooltip('Start line')
       .addTo(this.courseLayer);
@@ -115,9 +124,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
       if (steps.length > 0) {
         for (const st of steps) this.drawStep(st);
       } else if (prev) {
-        L.polyline([prev, here], { color: '#2f5bd3', weight: 3, dashArray: '6 6' }).addTo(
-          this.stopLayer,
-        );
+        L.polyline([prev, here], { color: LEG, weight: 3, dashArray: '6 6' }).addTo(this.stopLayer);
       }
       L.marker(here, { icon: badge(String(i + 1), 'stop') })
         .bindTooltip(`Stop ${i + 1}: mile ${(s.node.dist / 1609.344).toFixed(1)}`)
@@ -138,10 +145,10 @@ export class CourseMap implements AfterViewInit, OnDestroy {
         style = { color: '#6b6b70', weight: 2, dashArray: '3 5', opacity: 0.9 };
         break;
       case 'subway':
-        style = { color: lineColor(st.color) ?? '#2f5bd3', weight: 4, opacity: 0.85 };
+        style = { color: lineColor(st.color) ?? LEG, weight: 4, opacity: 0.85 };
         break;
       default:
-        style = { color: '#2f5bd3', weight: 3, dashArray: '6 6' };
+        style = { color: LEG, weight: 3, dashArray: '6 6' };
     }
     // Station names come from the feed; set them as text, not as tooltip HTML.
     const label = document.createElement('span');

@@ -55,6 +55,11 @@ a {
   color: var(--accent);
 }
 
+/* Grayscale base map, so subway line colors and the course stand out. */
+.tiles-gray {
+  filter: grayscale(1) brightness(1.05) contrast(0.9);
+}
+
 /* Map badges (Leaflet divIcons live outside component styles). */
 .badge {
   display: flex;
