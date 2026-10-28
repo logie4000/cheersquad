@@ -23,6 +23,28 @@ import (
 // points are typically 1-5 MB.
 const MaxUpload = 20 << 20
 
+// Limits on a single plan request. The planner keeps a travel time for
+// every pair of candidates, so memory and time grow with the square of the
+// candidate count; these keep one request from exhausting the container.
+const (
+	// MaxCourseMeters allows ultras up to 100 km.
+	MaxCourseMeters = 100_000
+	// MaxPoints is far more than any real course needs (a marathon recorded
+	// every second is about 15k points).
+	MaxPoints = 200_000
+	// MinSpacingMeters is the closest candidate spots may be.
+	MinSpacingMeters = 50
+	// MaxCandidates bounds the planner's pairwise table.
+	MaxCandidates = 2500
+	// MaxStopsLimit caps an explicit stop limit (0 still means no limit).
+	MaxStopsLimit = 50
+	// MaxMarks caps pinned spots, excluded areas and crossings each.
+	MaxMarks = 50
+	// MaxConcurrentPlans is how many plans may run at once; more get a 503
+	// rather than queueing up CPU and memory.
+	MaxConcurrentPlans = 4
+)
+
 // Runner is the runner half of a plan request.
 type Runner struct {
 	// FinishSeconds is the expected chip time.
@@ -137,11 +159,20 @@ func Handler(cfg Config) http.Handler {
 	if catalog == nil {
 		catalog = races.Default
 	}
+	busy := make(chan struct{}, MaxConcurrentPlans)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("POST /api/plan", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case busy <- struct{}{}:
+			defer func() { <-busy }()
+		default:
+			w.Header().Set("Retry-After", "5")
+			writeError(w, http.StatusServiceUnavailable, errors.New("server busy, try again in a few seconds"))
+			return
+		}
 		handlePlan(w, r, cfg)
 	})
 	mux.HandleFunc("GET /api/races", func(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +231,9 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkLimits(track, p); err != nil {
+		return nil, err
+	}
 	if p.CertifiedMeters > 0 {
 		track.Calibrate(p.CertifiedMeters)
 	}
@@ -231,6 +265,9 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		Excluded:    p.Excluded,
 		MileWeights: p.MileWeights,
 	})
+	if len(nodes) > MaxCandidates {
+		return nil, fmt.Errorf("too many candidate spots (%d, max %d); increase spacing or pin fewer spots", len(nodes), MaxCandidates)
+	}
 
 	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
 	walk := rt.walk
@@ -284,6 +321,42 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		Routing:    rt.label,
 		Legs:       legs,
 	}, nil
+}
+
+// checkLimits rejects requests big enough to exhaust memory or CPU, and
+// coordinates that are not real places.
+func checkLimits(track *gpx.Track, p Params) error {
+	if n := len(track.Points); n > MaxPoints {
+		return fmt.Errorf("course has %d points (max %d)", n, MaxPoints)
+	}
+	length := track.Length()
+	if p.CertifiedMeters > 0 {
+		length = p.CertifiedMeters
+	}
+	if length > MaxCourseMeters || track.Length() > MaxCourseMeters {
+		return fmt.Errorf("course is longer than %d km", MaxCourseMeters/1000)
+	}
+	if p.SpacingMeters > 0 && p.SpacingMeters < MinSpacingMeters {
+		return fmt.Errorf("spacing must be at least %d m", MinSpacingMeters)
+	}
+	if p.MaxStops < 0 || p.MaxStops > MaxStopsLimit {
+		return fmt.Errorf("max stops must be between 0 (no limit) and %d", MaxStopsLimit)
+	}
+	if len(p.Pinned) > MaxMarks || len(p.Excluded) > MaxMarks || len(p.Crossings) > MaxMarks {
+		return fmt.Errorf("at most %d pinned spots, excluded areas and crossings each", MaxMarks)
+	}
+	pts := []geo.LatLon{p.Spectator.Start}
+	pts = append(pts, p.Pinned...)
+	pts = append(pts, p.Crossings...)
+	for _, a := range p.Excluded {
+		pts = append(pts, a.Center)
+	}
+	for _, pt := range pts {
+		if !gpx.ValidCoord(pt) {
+			return fmt.Errorf("invalid coordinates (%v, %v)", pt.Lat, pt.Lon)
+		}
+	}
+	return nil
 }
 
 // routing is the travel setup chosen for one request.

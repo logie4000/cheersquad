@@ -32,7 +32,14 @@ export class PlanService {
       .post<PlanResponse>('api/plan', body)
       .pipe(
         catchError((err: HttpErrorResponse) =>
-          throwError(() => new Error(err.error?.error ?? `Request failed (${err.status})`)),
+          throwError(
+            () =>
+              new Error(
+                err.status === 429
+                  ? 'Too many plans in a short time. Wait a minute and try again.'
+                  : (err.error?.error ?? `Request failed (${err.status})`),
+              ),
+          ),
         ),
       );
   }

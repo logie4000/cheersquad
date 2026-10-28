@@ -7,7 +7,11 @@ services:
     # Only reachable from the host; the host Nginx proxies to it.
     ports:
       - "127.0.0.1:8085:8080"
+    # Caps the container so a runaway request cannot starve the other sites
+    # on the host. GOMEMLIMIT makes the Go GC work harder before the cap.
+    mem_limit: ${CHEERSQUAD_MEM_LIMIT:-2g}
     environment:
+      GOMEMLIMIT: ${CHEERSQUAD_GOMEMLIMIT:-1800MiB}
       # Subway routing feeds (deploy/scripts/fetch-gtfs.sh). An empty
       # directory is fine: transit falls back to the straight-line estimate.
       GTFS_DIR: /data/gtfs

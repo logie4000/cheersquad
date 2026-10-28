@@ -48,9 +48,11 @@ cd /srv/cheersquad
 deploy/scripts/deploy.sh
 curl -s http://127.0.0.1:8085/api/healthz    # -> ok
 
-# 3. Add the /cheersquad/ location to the existing www.specialbrew.net
+# 3. Add the /cheersquad/ locations to the existing www.specialbrew.net
 #    server block (paste deploy/nginx/cheersquad.location.conf into it, or
-#    `include /srv/cheersquad/deploy/nginx/cheersquad.location.conf;`).
+#    `include /srv/cheersquad/deploy/nginx/cheersquad.location.conf;`), and
+#    the plan rate-limit zone to the http context.
+sudo cp deploy/nginx/cheersquad.http.conf /etc/nginx/conf.d/
 sudo nginx -t && sudo systemctl reload nginx
 curl -s https://www.specialbrew.net/cheersquad/api/healthz   # -> ok
 ```

@@ -86,6 +86,15 @@ func TestPlanRejectsBadInput(t *testing.T) {
 		"bad json":       {straightGPX, `{`},
 		"bad mode":       {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "fly"}}`},
 		"no finish time": {straightGPX, `{"spectator": {"mode": "walk"}}`},
+		"bad coords":     {`<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="NaN" lon="0"/></trkseg></trk></gpx>`, good},
+		// Roughly 111 km due north.
+		"too long":       {`<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="1" lon="0"/></trkseg></trk></gpx>`, good},
+		"certified long": {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "certifiedMeters": 1e9}`},
+		"tiny spacing":   {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "spacingMeters": 0.01}`},
+		"many stops":     {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "maxStops": 1000000}`},
+		"negative stops": {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "maxStops": -1}`},
+		"bad start":      {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk", "start": {"lat": 200, "lon": 0}}}`},
+		"too many pins":  {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "pinned": [` + strings.Repeat(`{"lat":0,"lon":0},`, MaxMarks) + `{"lat":0,"lon":0}]}`},
 	}
 	for name, c := range cases {
 		rec := request(t, c.gpx, c.params)
