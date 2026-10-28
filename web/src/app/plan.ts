@@ -9,6 +9,9 @@ export interface LatLon {
 
 export type Mode = 'walk' | 'bike' | 'transit' | 'drive';
 
+/** Which day's transit timetable to use; Boston's Monday race is 'weekday'. */
+export type RaceDay = 'sunday' | 'saturday' | 'weekday';
+
 export interface Area {
   center: LatLon;
   radius: number;
@@ -26,6 +29,7 @@ export interface PlanParams {
     startTimeSeconds: number;
     mode: Mode;
     bufferSeconds: number;
+    raceDay: RaceDay;
   };
   certifiedMeters?: number;
   spacingMeters?: number;
@@ -88,6 +92,8 @@ export interface PlanResponse {
 export interface Race {
   id: string;
   name: string;
+  /** Set when the race is not on a Sunday. */
+  day?: RaceDay;
 }
 
 export const METERS_PER_MILE = 1609.344;
@@ -226,6 +232,7 @@ export interface PlanForm {
   gunTime: string; // HH:MM
   spectatorStart: string; // HH:MM
   mode: Mode;
+  raceDay: RaceDay;
   bufferMinutes: number;
   maxStops: number;
   lateMilesFrom: number | null; // weight late miles from this mile on
@@ -278,6 +285,7 @@ export function buildParams(f: PlanForm, marks: MapMarks): PlanParams | string {
       startTimeSeconds: leave - gun,
       mode: f.mode,
       bufferSeconds: f.bufferMinutes * 60,
+      raceDay: f.raceDay,
     },
     certifiedMeters,
     pinned: marks.pinned,

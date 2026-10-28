@@ -13,6 +13,7 @@ import (
 	"testing/fstest"
 
 	"github.com/logie4000/cheersquad/internal/geo"
+	"github.com/logie4000/cheersquad/internal/gpx"
 	"github.com/logie4000/cheersquad/internal/races"
 	"github.com/logie4000/cheersquad/internal/travel"
 )
@@ -274,3 +275,43 @@ func TestPlanTransitFallsBackWithoutCoverage(t *testing.T) {
 		t.Fatalf("routing %q", resp.Routing)
 	}
 }
+
+// Boston runs on a Monday: the weekday network is used when asked for, and
+// Sunday's otherwise.
+func TestPlanTransitRaceDay(t *testing.T) {
+	cfg := Config{
+		Networks:    []travel.Network{courseNet{covers: true}},
+		DayNetworks: map[RaceDay][]travel.Network{Weekday: {weekdayNet{courseNet{covers: true}}}},
+	}
+	plan := func(day string) (*Response, error) {
+		var p Params
+		p.Runner.FinishSeconds = 4 * 3600
+		p.Spectator.Mode = travel.Transit
+		p.Spectator.RaceDay = RaceDay(day)
+		track, err := gpx.Parse(strings.NewReader(straightGPX))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Plan(track, p, cfg)
+	}
+	for day, want := range map[string]string{
+		"":         "Test Metro (Sunday schedule)",
+		"saturday": "Test Metro (Sunday schedule)",
+		"weekday":  "Weekday Metro (weekday schedule)",
+	} {
+		resp, err := plan(day)
+		if err != nil {
+			t.Fatalf("%q: %v", day, err)
+		}
+		if !strings.Contains(resp.Routing, want) {
+			t.Errorf("%q: routing %q, want %q", day, resp.Routing, want)
+		}
+	}
+	if _, err := plan("monday"); err == nil {
+		t.Error("an unknown race day should be rejected")
+	}
+}
+
+type weekdayNet struct{ courseNet }
+
+func (weekdayNet) Name() string { return "Weekday Metro" }

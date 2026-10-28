@@ -3,7 +3,8 @@
 //
 // Race day and the runner's clock times are not known exactly when a feed
 // is loaded, so waits use a frequency model (half the typical headway in a
-// morning window on a representative Sunday) rather than exact timetables.
+// morning window on a representative race day, Sunday unless Options.Days
+// says otherwise) rather than exact timetables.
 package gtfs
 
 import (
@@ -53,10 +54,18 @@ type Options struct {
 	// TransferWalkMeters is the farthest two distinct stations can be apart
 	// and still allow a walking transfer. Default 250.
 	TransferWalkMeters float64
+	// Days are the days of the week race day may fall on. The service day
+	// used is the date on one of these days that runs the most of the
+	// network. Default Sunday; WeekdayDays for a race on a weekday, such
+	// as Boston on Patriots' Day.
+	Days []time.Weekday
 	// ServiceDate, if set, picks the service active on that date instead of
-	// a representative Sunday.
+	// a representative day.
 	ServiceDate time.Time
 }
+
+// WeekdayDays are Monday to Friday, for Options.Days.
+var WeekdayDays = []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}
 
 // DefaultRouteTypes are subway, metro and light rail route types. Light
 // rail (0, 900) is included because some systems file their subway-like
@@ -106,6 +115,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.FrequentHeadway == 0 {
 		o.FrequentHeadway = 900
+	}
+	if len(o.Days) == 0 {
+		o.Days = []time.Weekday{time.Sunday}
 	}
 	return o
 }
@@ -234,7 +246,7 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 		}
 	}
 
-	active, err := selectService(fsys, trips, o.ServiceDate, serviceEdges(trips, tripStops))
+	active, err := selectService(fsys, trips, o.ServiceDate, o.Days, serviceEdges(trips, tripStops))
 	if err != nil {
 		return nil, err
 	}
@@ -699,10 +711,6 @@ func readTrips(fsys fs.FS, routeIdx map[string]int) ([]tripRow, map[string]int, 
 	return trips, idx, nil
 }
 
-// selectService returns the service_ids to use, or nil for all trips. With
-// no date given it picks the Sunday on which the most subway trips run;
-// if no Sunday has service per calendar.txt/calendar_dates.txt it returns
-// nil.
 // serviceEdges lists, per service_id, the station-to-station hops its
 // trips ride, so service days can be compared by how much of the network
 // they run.
@@ -720,7 +728,11 @@ func serviceEdges(trips []tripRow, tripStops [][]stopTime) map[string]map[edgeKe
 	return out
 }
 
-func selectService(fsys fs.FS, trips []tripRow, date time.Time, edges map[string]map[edgeKey]bool) (map[string]bool, error) {
+// selectService returns the service_ids to use, or nil for all trips. With
+// no date given it picks the date on one of days that runs the most of the
+// network; if none has service per calendar.txt/calendar_dates.txt it
+// returns nil.
+func selectService(fsys fs.FS, trips []tripRow, date time.Time, days []time.Weekday, edges map[string]map[edgeKey]bool) (map[string]bool, error) {
 	type calRow struct {
 		days       [7]bool // by time.Weekday
 		start, end time.Time
@@ -814,24 +826,30 @@ func selectService(fsys fs.FS, trips []tripRow, date time.Time, edges map[string
 		return set, nil
 	}
 
+	var want [7]bool
+	for _, d := range days {
+		want[d] = true
+	}
 	var candidates []time.Time
 	for _, c := range cal {
-		if !c.days[time.Sunday] {
-			continue
-		}
-		d := c.start.AddDate(0, 0, (7-int(c.start.Weekday()))%7)
-		for k := 0; !d.After(c.end) && k < 1000; k++ {
-			candidates = append(candidates, d)
-			d = d.AddDate(0, 0, 7)
+		for wd := range want {
+			if !want[wd] || !c.days[wd] {
+				continue
+			}
+			d := c.start.AddDate(0, 0, (7+wd-int(c.start.Weekday()))%7)
+			for k := 0; !d.After(c.end) && k < 1000; k++ {
+				candidates = append(candidates, d)
+				d = d.AddDate(0, 0, 7)
+			}
 		}
 	}
 	for d := range exc {
-		if d.Weekday() == time.Sunday {
+		if want[d.Weekday()] {
 			candidates = append(candidates, d)
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Before(candidates[j]) })
-	// The best Sunday runs the most of the network, so a Sunday with a
+	// The best day runs the most of the network, so a Sunday with a
 	// planned diversion (shuttle buses replacing a stretch of line) loses
 	// to a normal one even if the diversion schedule has more trips. Trip
 	// count breaks ties.

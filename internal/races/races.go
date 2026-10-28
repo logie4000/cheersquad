@@ -25,6 +25,24 @@ var embedded embed.FS
 type Race struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Day is the race's transit timetable when it is not Sunday's
+	// ("saturday" or "weekday"), so the UI can preselect it.
+	Day string `json:"day,omitempty"`
+}
+
+// raceDays are the races not run on a Sunday, by id prefix. Boston is on
+// Patriots' Day, a Monday, and the T runs its weekday schedule.
+var raceDays = map[string]string{
+	"boston-": "weekday",
+}
+
+func dayOf(id string) string {
+	for prefix, day := range raceDays {
+		if strings.HasPrefix(id, prefix) {
+			return day
+		}
+	}
+	return ""
 }
 
 // Catalog is an immutable set of races, read once at construction.
@@ -57,7 +75,7 @@ func NewCatalog(fsys fs.FS) (*Catalog, error) {
 		if err != nil || name == "" {
 			name = id
 		}
-		c.list = append(c.list, Race{ID: id, Name: name})
+		c.list = append(c.list, Race{ID: id, Name: name, Day: dayOf(id)})
 		c.gpx[id] = data
 	}
 	sort.SliceStable(c.list, func(i, j int) bool {

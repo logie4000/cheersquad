@@ -71,6 +71,16 @@
           <option value="drive">Car</option>
         </select>
       </label>
+      @if (form.controls.mode.value === 'transit') {
+        <label>
+          Race day timetable
+          <select formControlName="raceDay">
+            <option value="sunday">Sunday</option>
+            <option value="saturday">Saturday</option>
+            <option value="weekday">Weekday (Boston's Monday)</option>
+          </select>
+        </label>
+      }
       <label
         >Arrive at least (min) before <input type="number" min="0" formControlName="bufferMinutes"
       /></label>

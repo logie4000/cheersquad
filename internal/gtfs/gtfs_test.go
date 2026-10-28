@@ -2,6 +2,7 @@ package gtfs
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -581,5 +582,52 @@ b3,08:53:00,08:53:00,Q,2
 	}
 	if r := n.Rides(idx["P"], idx["Q"]); len(r) != 1 || r[0].Line != "S5" {
 		t.Fatalf("rides %+v", r)
+	}
+}
+
+// Boston's marathon is on a Monday, when the T runs its weekday schedule:
+// trains every 5 minutes rather than Sunday's 20.
+func TestWeekdaySchedule(t *testing.T) {
+	var trips, times strings.Builder
+	trips.WriteString("route_id,service_id,trip_id\n")
+	times.WriteString("trip_id,arrival_time,departure_time,stop_id,stop_sequence\n")
+	add := func(svc string, every int) {
+		for k, m := 0, 0; m < 60; k, m = k+1, m+every {
+			id := fmt.Sprintf("%s%d", svc, k)
+			fmt.Fprintf(&trips, "L,%s,%s\n", svc, id)
+			fmt.Fprintf(&times, "%s,08:%02d:00,08:%02d:00,P,1\n", id, m, m)
+			fmt.Fprintf(&times, "%s,08:%02d:00,08:%02d:00,Q,2\n", id, m+2, m+2)
+		}
+	}
+	add("SUN", 20)
+	add("WKD", 5)
+	dir := writeFeed(t, map[string]string{
+		"routes.txt": "route_id,route_short_name,route_type\nL,L,1\n",
+		"stops.txt":  lineStops,
+		"calendar.txt": `service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+SUN,0,0,0,0,0,0,1,20260101,20261231
+WKD,1,1,1,1,1,0,0,20260101,20261231
+`,
+		"trips.txt":      trips.String(),
+		"stop_times.txt": times.String(),
+	})
+	cases := []struct {
+		days []time.Weekday
+		want float64 // entry + half the headway + ride
+	}{
+		{nil, 120 + 600 + 120},
+		{WeekdayDays, 120 + 150 + 120},
+		{[]time.Weekday{time.Saturday}, 0}, // no Saturday service: every trip
+	}
+	for _, c := range cases {
+		n := load(t, dir, Options{Days: c.days})
+		idx := indexes(t, n)
+		got, ok := n.Time(idx["P"], idx["Q"])
+		if !ok {
+			t.Fatalf("days %v: P->Q unreachable", c.days)
+		}
+		if c.want != 0 && math.Abs(got-c.want) > 1 {
+			t.Errorf("days %v: P->Q %.0f s, want %.0f", c.days, got, c.want)
+		}
 	}
 }
