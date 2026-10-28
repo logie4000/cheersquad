@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
-import { CourseMap } from './course-map';
+import { CourseMap, DEFAULT_COURSE_COLOR } from './course-map';
 import {
   buildParams,
   formatClock,
@@ -22,6 +22,17 @@ import {
 import { PlanService } from './plan.service';
 
 type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
+
+const COURSE_COLOR_KEY = 'cheersquad.courseColor';
+
+/** The remembered course color; storage can be blocked, so fall back quietly. */
+function savedCourseColor(): string {
+  try {
+    const c = localStorage.getItem(COURSE_COLOR_KEY);
+    if (c && /^#[0-9a-f]{6}$/i.test(c)) return c;
+  } catch {}
+  return DEFAULT_COURSE_COLOR;
+}
 
 @Component({
   selector: 'app-root',
@@ -63,12 +74,20 @@ export class App {
   readonly result = signal<PlanResponse | null>(null);
   readonly error = signal<string | null>(null);
   readonly loading = signal(false);
+  readonly courseColor = signal(savedCourseColor());
   readonly stops = computed(() => this.result()?.plan.stops ?? []);
   /** Index-aligned with stops; empty legs when the server sends none. */
   readonly legs = computed(() => {
     const r = this.result();
     return r ? r.plan.stops.map((_, i) => legSteps(r, i)) : [];
   });
+
+  setCourseColor(color: string): void {
+    this.courseColor.set(color);
+    try {
+      localStorage.setItem(COURSE_COLOR_KEY, color);
+    } catch {}
+  }
 
   async onFile(event: Event): Promise<void> {
     const file = (event.target as HTMLInputElement).files?.[0] ?? null;

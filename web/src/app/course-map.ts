@@ -13,11 +13,12 @@ import { EXCLUDE_RADIUS, LatLon, lineColor, MapMarks, Step, stepText, Stop } fro
 
 // Leaflet writes path colors as SVG attributes, which can't read CSS variables,
 // so these are literals from the sweat-equity palette in styles.css:
-// start #00897b, finish and non-subway legs = --fg, excluded and walks = --muted.
+// start #00897b, finish and non-subway legs = --fg, walks black, excluded = --muted.
 // Subway steps use the feed's line color, so the course is a bright blue on a
 // white casing over grayscale tiles to stay distinct from transit colors.
-const COURSE = '#0a5cff';
+export const DEFAULT_COURSE_COLOR = '#0a5cff';
 const LEG = '#1d1d1f';
+const WALK = '#000000';
 
 /**
  * Leaflet map showing the course, the user's marks (start, pinned spots,
@@ -36,6 +37,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   readonly stops = input<Stop[]>([]);
   /** legs[i] is how to get to stops[i]; a missing or empty leg is drawn as a straight line. */
   readonly legs = input<Step[][]>([]);
+  readonly courseColor = input(DEFAULT_COURSE_COLOR);
   readonly mapClick = output<LatLon>();
 
   private readonly el = viewChild.required<ElementRef<HTMLDivElement>>('map');
@@ -43,9 +45,12 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   private readonly courseLayer = L.layerGroup();
   private readonly markLayer = L.layerGroup();
   private readonly stopLayer = L.layerGroup();
+  private courseLine?: L.Polyline;
 
   constructor() {
     effect(() => this.drawCourse(this.course()));
+    // Recolor in place so changing the color doesn't refit the map.
+    effect(() => this.courseLine?.setStyle({ color: this.courseColor() }));
     effect(() => this.drawMarks(this.marks()));
     effect(() => this.drawStops(this.stops(), this.legs()));
   }
@@ -77,10 +82,14 @@ export class CourseMap implements AfterViewInit, OnDestroy {
 
   private drawCourse(points: LatLon[]): void {
     this.courseLayer.clearLayers();
+    this.courseLine = undefined;
     if (points.length < 2) return;
     const latlngs = points.map((p) => L.latLng(p.lat, p.lon));
     L.polyline(latlngs, { color: '#ffffff', weight: 8, opacity: 0.9 }).addTo(this.courseLayer);
-    const line = L.polyline(latlngs, { color: COURSE, weight: 4 }).addTo(this.courseLayer);
+    const line = L.polyline(latlngs, { color: this.courseColor(), weight: 4 }).addTo(
+      this.courseLayer,
+    );
+    this.courseLine = line;
     L.circleMarker(latlngs[0], { radius: 6, color: '#00897b', fillOpacity: 1 })
       .bindTooltip('Start line')
       .addTo(this.courseLayer);
@@ -133,7 +142,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     });
   }
 
-  /** Walks are thin dashed gray lines; rides are solid in the line's color. */
+  /** Walks are dashed black lines; rides are solid in the line's color. */
   private drawStep(st: Step): void {
     const ends: L.LatLngExpression[] = [
       [st.fromPos.lat, st.fromPos.lon],
@@ -142,7 +151,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     let style: L.PolylineOptions;
     switch (st.kind) {
       case 'walk':
-        style = { color: '#6b6b70', weight: 2, dashArray: '3 5', opacity: 0.9 };
+        style = { color: WALK, weight: 3, dashArray: '3 5' };
         break;
       case 'subway':
         style = { color: lineColor(st.color) ?? LEG, weight: 4, opacity: 0.85 };

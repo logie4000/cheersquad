@@ -96,6 +96,14 @@
       <button type="button" class="link" (click)="clearMarks()">
         Clear pins, exclusions and crossings
       </button>
+      <label class="mode">
+        Course color
+        <input
+          type="color"
+          [value]="courseColor()"
+          (input)="setCourseColor($any($event.target).value)"
+        />
+      </label>
     </fieldset>
 
     @if (error()) {
@@ -112,6 +120,7 @@
       [marks]="marks()"
       [stops]="stops()"
       [legs]="legs()"
+      [courseColor]="courseColor()"
       (mapClick)="onMapClick($event)"
     />
 
