@@ -37,7 +37,9 @@ export class PlanService {
               new Error(
                 err.status === 429
                   ? 'Too many plans in a short time. Wait a minute and try again.'
-                  : (err.error?.error ?? `Request failed (${err.status})`),
+                  : err.status === 413
+                    ? 'That GPX file is too large (the limit is 3 MB).'
+                    : (err.error?.error ?? `Request failed (${err.status})`),
               ),
           ),
         ),

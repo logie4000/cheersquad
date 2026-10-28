@@ -21,9 +21,10 @@ import (
 	"github.com/logie4000/cheersquad/internal/travel"
 )
 
-// MaxUpload caps the request body. Marathon GPX files with dense track
-// points are typically 1-5 MB.
-const MaxUpload = 20 << 20
+// MaxUpload caps the request body (GPX plus params). Course GPX files are
+// typically under 250 KB; a per-second watch recording of a marathon is
+// a few MB. Keep in step with client_max_body_size in the Nginx snippet.
+const MaxUpload = 3 << 20
 
 // Limits on a single plan request. The planner keeps a travel time for
 // every pair of candidates, so memory and time grow with the square of the

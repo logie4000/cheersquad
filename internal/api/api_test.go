@@ -107,6 +107,14 @@ func TestPlanRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsOversizeUpload(t *testing.T) {
+	big := "<gpx>" + strings.Repeat(" ", MaxUpload) + "</gpx>"
+	rec := request(t, big, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	Handler(Config{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/healthz", nil))
