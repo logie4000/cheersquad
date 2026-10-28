@@ -110,6 +110,7 @@ func (n *Network) Rides(i, j int) []travel.Ride {
 			continue
 		}
 		r := &rides[len(rides)-1]
+		r.Via = append(r.Via, r.To)
 		r.To = int(e.to)
 		r.Seconds += e.ride
 	}

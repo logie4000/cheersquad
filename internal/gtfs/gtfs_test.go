@@ -124,6 +124,12 @@ func TestHandCheckedTimes(t *testing.T) {
 			t.Errorf("Rides(%s,%s) endpoints = %d..%d", c.from, c.to, rides[0].From, rides[len(rides)-1].To)
 		}
 	}
+	if r := n.Rides(idx["A"], idx["B"]); len(r[0].Via) != 1 || r[0].Via[0] != idx["X"] {
+		t.Errorf("A->B should stop at X on the way: %+v", r)
+	}
+	if r := n.Rides(idx["X"], idx["B"]); len(r[0].Via) != 0 {
+		t.Errorf("X->B has no stops in between: %+v", r)
+	}
 	if r := n.Rides(idx["A"], idx["F"]); r[0].To != idx["B"] || r[1].From != idx["W"] {
 		t.Errorf("A->F should ride to B and board at W: %+v", r)
 	}

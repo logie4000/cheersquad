@@ -66,6 +66,8 @@ export interface Step {
   to?: string;
   fromPos: LatLon;
   toPos: LatLon;
+  /** Stations the train stops at between from and to (subway steps only). */
+  via?: { name: string; pos: LatLon }[];
   seconds: number;
 }
 
@@ -156,7 +158,9 @@ export function stepDetail(s: Step): string {
   const time = stepMinutes(s.seconds);
   if (s.kind !== 'subway') return `${STEP_VERB[s.kind] ?? 'Travel'} ${time}`;
   const stations = s.from && s.to ? `${s.from} → ${s.to}` : (s.to ?? s.from ?? '');
-  return stations ? `${stations} · ${time}` : time;
+  const n = (s.via?.length ?? 0) + 1;
+  const stops = s.via?.length ? ` · ${n} stops` : '';
+  return stations ? `${stations}${stops} · ${time}` : `${time}${stops}`;
 }
 
 /** A step as one line of text: "Walk 6 min" or "1 train · 72 St → 14 St · 9 min". */

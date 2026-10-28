@@ -117,6 +117,11 @@ describe('leg steps', () => {
     expect(stepText(walk)).toBe('Walk 6 min');
     expect(stepText(ride)).toBe('1 train · 72 St → 14 St · 9 min');
     expect(stepDetail(ride)).toBe('72 St → 14 St · 9 min');
+    const via = [
+      { name: '42 St', pos: { lat: 40.75, lon: -73.99 } },
+      { name: '34 St', pos: { lat: 40.75, lon: -73.99 } },
+    ];
+    expect(stepDetail({ ...ride, via })).toBe('72 St → 14 St · 3 stops · 9 min');
     expect(stepText({ ...ride, line: 'Red Line', from: undefined, to: undefined })).toBe(
       'Red Line · 9 min',
     );

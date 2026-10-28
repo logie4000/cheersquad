@@ -208,10 +208,14 @@ func (s *Subway) Steps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 	sum := 0.0
 	for _, r := range rides {
 		from, to := stations[r.From], stations[r.To]
+		var via []Stop
+		for _, v := range r.Via {
+			via = append(via, Stop{Name: stations[v].Name, Pos: stations[v].Pos})
+		}
 		subway = append(subway, Step{
 			Kind: StepSubway, Line: r.Line, Color: r.Color,
 			From: from.Name, To: to.Name, FromPos: from.Pos, ToPos: to.Pos,
-			Seconds: r.Seconds,
+			Via: via, Seconds: r.Seconds,
 		})
 		sum += r.Seconds
 	}

@@ -144,8 +144,11 @@ export class CourseMap implements AfterViewInit, OnDestroy {
 
   /** Walks are dashed black lines; rides are solid in the line's color. */
   private drawStep(st: Step): void {
+    const via = st.via ?? [];
+    // Rides follow the line through each stop the train makes on the way.
     const ends: L.LatLngExpression[] = [
       [st.fromPos.lat, st.fromPos.lon],
+      ...via.map((v): L.LatLngExpression => [v.pos.lat, v.pos.lon]),
       [st.toPos.lat, st.toPos.lon],
     ];
     let style: L.PolylineOptions;
@@ -163,6 +166,25 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     const label = document.createElement('span');
     label.textContent = stepText(st);
     L.polyline(ends, style).bindTooltip(label).addTo(this.stopLayer);
+    if (st.kind !== 'subway') return;
+    const ring = style.color ?? LEG;
+    const stops = [
+      { name: st.from ?? '', pos: st.fromPos },
+      ...via,
+      { name: st.to ?? '', pos: st.toPos },
+    ];
+    for (const s of stops) {
+      const name = document.createElement('span');
+      name.textContent = s.name;
+      const dot = L.circleMarker([s.pos.lat, s.pos.lon], {
+        radius: 4,
+        color: ring,
+        weight: 2,
+        fillColor: '#ffffff',
+        fillOpacity: 1,
+      }).addTo(this.stopLayer);
+      if (s.name) dot.bindTooltip(name);
+    }
   }
 }
 

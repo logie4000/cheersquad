@@ -19,6 +19,8 @@ type Ride struct {
 	Color string `json:"color,omitempty"`
 	From  int    `json:"-"`
 	To    int    `json:"-"`
+	// Via lists the stations the train stops at between From and To.
+	Via []int `json:"-"`
 	// Seconds includes the wait for the train and the ride itself.
 	Seconds float64 `json:"seconds"`
 }
@@ -67,7 +69,16 @@ type Step struct {
 	To      string     `json:"to,omitempty"`
 	FromPos geo.LatLon `json:"fromPos"`
 	ToPos   geo.LatLon `json:"toPos"`
-	Seconds float64    `json:"seconds"`
+	// Via lists the stops between From and To on subway steps, so the map
+	// can draw the ride along the line instead of as a straight line.
+	Via     []Stop  `json:"via,omitempty"`
+	Seconds float64 `json:"seconds"`
+}
+
+// Stop is an intermediate station on a subway step.
+type Stop struct {
+	Name string     `json:"name"`
+	Pos  geo.LatLon `json:"pos"`
 }
 
 // Describer is implemented by providers that can break a leg into steps.
