@@ -55,11 +55,33 @@ export interface Stop {
   wait: number;
 }
 
+export type StepKind = 'walk' | 'subway' | 'transit' | 'bike' | 'drive';
+
+/** One part of a travel leg, e.g. a walk to a station or a subway ride. */
+export interface Step {
+  kind: StepKind;
+  line?: string; // subway line name, e.g. "1" or "Red Line"
+  color?: string; // line color as hex without '#'
+  from?: string; // station name
+  to?: string;
+  fromPos: LatLon;
+  toPos: LatLon;
+  /** Stations the train stops at between from and to (subway steps only). */
+  via?: { name: string; pos: LatLon }[];
+  /** Track geometry of a subway ride, when the feed has shapes. */
+  path?: LatLon[];
+  seconds: number;
+}
+
 export interface PlanResponse {
   course: { points: LatLon[]; length: number };
   mode: Mode;
   candidates: number;
   plan: { stops: Stop[]; sightings: number; value: number };
+  /** How travel was routed, e.g. "Subway: MTA ... (GTFS), walking: straight-line estimate". */
+  routing?: string;
+  /** legs[i] is how to get to stop i from the previous stop (or the start). */
+  legs?: Step[][];
 }
 
 /** A preloaded race course from GET api/races. */
@@ -105,6 +127,77 @@ export function formatMinutes(seconds: number): string {
   const h = Math.floor(total / 60);
   const m = total % 60;
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+/** The steps for reaching stop i; empty if the server sent no legs. */
+export function legSteps(r: PlanResponse, i: number): Step[] {
+  const leg = r.legs?.[i];
+  return Array.isArray(leg) ? leg : [];
+}
+
+/** Formats a step's duration as "6 min", "<1 min" or "1 h 05 min". */
+export function stepMinutes(seconds: number): string {
+  const m = Math.round(seconds / 60);
+  if (m < 1) return '<1 min';
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
+
+/** Names a subway line the way riders say it: "1 train", but "Red Line" as is. */
+export function lineLabel(line: string | undefined): string {
+  const l = (line ?? '').trim();
+  if (!l) return 'Subway';
+  return /^[A-Z0-9]{1,3}$/i.test(l) ? `${l} train` : l;
+}
+
+const STEP_VERB: Record<StepKind, string> = {
+  walk: 'Walk',
+  subway: 'Ride',
+  transit: 'Transit',
+  bike: 'Bike',
+  drive: 'Drive',
+};
+
+/**
+ * A step without its line name, for showing next to a line badge:
+ * "72 St → 14 St · 9 min" for a ride, "Walk 6 min" otherwise.
+ */
+export function stepDetail(s: Step): string {
+  const time = stepMinutes(s.seconds);
+  if (s.kind !== 'subway') return `${STEP_VERB[s.kind] ?? 'Travel'} ${time}`;
+  const stations = s.from && s.to ? `${s.from} → ${s.to}` : (s.to ?? s.from ?? '');
+  const n = (s.via?.length ?? 0) + 1;
+  const stops = s.via?.length ? ` · ${n} stops` : '';
+  return stations ? `${stations}${stops} · ${time}` : `${time}${stops}`;
+}
+
+/** A step as one line of text: "Walk 6 min" or "1 train · 72 St → 14 St · 9 min". */
+export function stepText(s: Step): string {
+  return s.kind === 'subway' ? `${lineLabel(s.line)} · ${stepDetail(s)}` : stepDetail(s);
+}
+
+/** A feed's line color as "#rrggbb", or null if missing or malformed. */
+export function lineColor(hex: string | undefined): string | null {
+  const h = (hex ?? '').trim().replace(/^#/, '');
+  if (/^[0-9a-f]{6}$/i.test(h)) return `#${h.toLowerCase()}`;
+  if (/^[0-9a-f]{3}$/i.test(h)) {
+    return `#${[...h.toLowerCase()].map((c) => c + c).join('')}`;
+  }
+  return null;
+}
+
+/**
+ * Black or white, whichever has more WCAG contrast on the given "#rrggbb"
+ * background. The better of the two is always at least 4.58:1.
+ */
+export function textOn(bg: string): '#000000' | '#ffffff' {
+  const lin = (i: number) => {
+    const c = parseInt(bg.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const y = 0.2126 * lin(1) + 0.7152 * lin(3) + 0.0722 * lin(5);
+  // Contrast with black is (y + 0.05) / 0.05, with white 1.05 / (y + 0.05).
+  return (y + 0.05) / 0.05 >= 1.05 / (y + 0.05) ? '#000000' : '#ffffff';
 }
 
 /** Reads track points (or route points) from GPX text for the map preview. */

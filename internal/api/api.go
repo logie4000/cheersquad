@@ -65,6 +65,24 @@ type Response struct {
 	Mode       travel.Mode  `json:"mode"`
 	Candidates int          `json:"candidates"`
 	Plan       planner.Plan `json:"plan"`
+	// Routing says in words where travel times came from.
+	Routing string `json:"routing"`
+	// Legs[i] is how to get to Plan.Stops[i] from the previous stop (or
+	// the start). Its steps' seconds sum to that stop's travel time.
+	Legs [][]travel.Step `json:"legs"`
+}
+
+// Config is what the server knows beyond a single request.
+type Config struct {
+	// Networks are the subway systems available for transit mode. The
+	// first that covers the course is used.
+	Networks []travel.Network
+	// Walk times walking, for walk mode and the walking parts of transit.
+	// Nil means the straight-line stub. If it is a travel.Prefetcher it is
+	// warmed with every point a plan may ask about before solving.
+	Walk travel.Provider
+	// Races are the preloaded courses; nil means the embedded ones.
+	Races *races.Catalog
 }
 
 // Course is the (possibly calibrated) course for drawing on the map.
@@ -74,14 +92,18 @@ type Course struct {
 }
 
 // Handler returns the API routes, to be mounted at /api/.
-func Handler() http.Handler { return newHandler(races.Default) }
-
-func newHandler(catalog *races.Catalog) http.Handler {
+func Handler(cfg Config) http.Handler {
+	catalog := cfg.Races
+	if catalog == nil {
+		catalog = races.Default
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("POST /api/plan", handlePlan)
+	mux.HandleFunc("POST /api/plan", func(w http.ResponseWriter, r *http.Request) {
+		handlePlan(w, r, cfg)
+	})
 	mux.HandleFunc("GET /api/races", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(catalog.List())
@@ -101,7 +123,7 @@ func newHandler(catalog *races.Catalog) http.Handler {
 
 // handlePlan expects multipart/form-data with a "gpx" file and a "params"
 // JSON field.
-func handlePlan(w http.ResponseWriter, r *http.Request) {
+func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUpload)
 	if err := r.ParseMultipartForm(MaxUpload); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("expected multipart form with gpx and params: %w", err))
@@ -123,7 +145,7 @@ func handlePlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("params: %w", err))
 		return
 	}
-	resp, err := Plan(track, p)
+	resp, err := Plan(track, p, cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -133,7 +155,7 @@ func handlePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 // Plan runs the whole pipeline on a parsed track.
-func Plan(track *gpx.Track, p Params) (*Response, error) {
+func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 	mode, err := travel.ParseMode(string(p.Spectator.Mode))
 	if err != nil {
 		return nil, err
@@ -166,10 +188,24 @@ func Plan(track *gpx.Track, p Params) (*Response, error) {
 		MileWeights: p.MileWeights,
 	})
 
-	stub := travel.Haversine{}
-	var provider travel.Provider = stub
+	rt := chooseRouting(cfg, mode, p.Spectator.Start, track.Points)
+	walk := rt.walk
 	if len(p.Crossings) > 0 {
-		provider = travel.Closures{Inner: stub, Course: track.Points, Crossings: p.Crossings}
+		walk = travel.Closures{Inner: walk, Course: track.Points, Crossings: p.Crossings}
+	}
+	var provider travel.Provider = walk
+	if rt.net != nil {
+		provider = &travel.Subway{Net: rt.net, Walk: walk}
+	}
+	if pf, ok := rt.walk.(travel.Prefetcher); ok {
+		pts := []geo.LatLon{p.Spectator.Start}
+		for _, n := range nodes {
+			pts = append(pts, n.Pos)
+		}
+		if s, ok := provider.(*travel.Subway); ok {
+			pts = append(pts, s.StationsNear(pts)...)
+		}
+		pf.Prefetch(append(pts, p.Crossings...))
 	}
 	provider = &travel.Cached{Inner: provider}
 	travelFn := func(a, b geo.LatLon) (float64, bool) { return provider.Duration(a, b, mode) }
@@ -179,19 +215,83 @@ func Plan(track *gpx.Track, p Params) (*Response, error) {
 		nodes, travelFn,
 		planner.Params{
 			Buffer: buffer,
-			// The stub's detour factor is at least 1, so straight line at
-			// the mode's speed is a true lower bound on travel time.
-			MaxSpeed:    stub.Speed(mode),
+			// A true upper bound on straight-line speed (0 if the provider
+			// cannot give one, which turns the prefilter off).
+			MaxSpeed:    travel.MaxSpeed(provider, mode),
 			MaxStops:    p.MaxStops,
 			StopPenalty: p.StopPenalty,
 		},
 	)
+	legs := make([][]travel.Step, len(plan.Stops))
+	prev := p.Spectator.Start
+	for i, st := range plan.Stops {
+		steps, ok := travel.Describe(provider, prev, st.Node.Pos, mode)
+		if !ok {
+			steps = []travel.Step{}
+		}
+		legs[i] = steps
+		prev = st.Node.Pos
+	}
 	return &Response{
 		Course:     Course{Points: track.Points, Length: track.Length()},
 		Mode:       mode,
 		Candidates: len(nodes),
 		Plan:       plan,
+		Routing:    rt.label,
+		Legs:       legs,
 	}, nil
+}
+
+// routing is the travel setup chosen for one request.
+type routing struct {
+	// walk is the base provider before closures: the configured walker for
+	// walk and transit modes, the straight-line stub otherwise.
+	walk  travel.Provider
+	net   travel.Network // nil unless transit runs on a subway
+	label string
+}
+
+func chooseRouting(cfg Config, mode travel.Mode, start geo.LatLon, course []geo.LatLon) routing {
+	stub := travel.Haversine{}
+	walk, walkName := cfg.Walk, "straight-line estimate"
+	if walk == nil {
+		walk = stub
+	} else if s, ok := walk.(fmt.Stringer); ok {
+		walkName = s.String()
+	} else {
+		walkName = "routed"
+	}
+	switch mode {
+	case travel.Walk:
+		return routing{walk: walk, label: "Walking: " + walkName}
+	case travel.Transit:
+		for _, n := range cfg.Networks {
+			if covers(n, start, course) {
+				return routing{walk: walk, net: n, label: fmt.Sprintf("Subway: %s, walking: %s", n.Name(), walkName)}
+			}
+		}
+		why := "no subway data covers this course"
+		if len(cfg.Networks) == 0 {
+			why = "no subway data loaded"
+		}
+		return routing{walk: stub, label: "Straight-line estimate (" + why + ")"}
+	}
+	return routing{walk: stub, label: "Straight-line estimate"}
+}
+
+// covers reports whether n serves the spectator's start and at least half
+// of the course.
+func covers(n travel.Network, start geo.LatLon, course []geo.LatLon) bool {
+	if !n.Covers(start) {
+		return false
+	}
+	in := 0
+	for _, p := range course {
+		if n.Covers(p) {
+			in++
+		}
+	}
+	return 2*in >= len(course)
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {

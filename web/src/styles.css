@@ -15,7 +15,8 @@
   --badge-start: #e8710a;
   --badge-pin: #c2185b;
   --badge-cross: #6b6b70;
-  --badge-stop: var(--accent);
+  /* Spectating spots: deepskyblue, light, so they take dark numbers. */
+  --badge-stop: deepskyblue;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -30,8 +31,6 @@
     --page: #16161a;
     /* darkblue is unreadable on the dark background. */
     --brand: #8aa8ff;
-    /* Badges sit on light map tiles, so the stop keeps the light-theme blue. */
-    --badge-stop: #2f5bd3;
   }
 }
 
@@ -53,6 +52,11 @@ body {
 
 a {
   color: var(--accent);
+}
+
+/* Grayscale base map, so subway line colors and the course stand out. */
+.tiles-gray {
+  filter: grayscale(1) brightness(1.05) contrast(0.9);
 }
 
 /* Map badges (Leaflet divIcons live outside component styles). */
@@ -79,4 +83,5 @@ a {
 }
 .badge-stop {
   background: var(--badge-stop);
+  color: #1d1d1f;
 }

@@ -26,5 +26,5 @@ Marathon spectator planner. Read SPEC.md for what to build and why; this file co
 - Lint/format: `gofmt -l . && go vet ./...` and `cd web && npx prettier --check "src/**/*.{ts,html,css}"`
 
 ## Open decisions
-- Routing provider (OSRM self-hosted vs. hosted API)
+- Routing (settled for now): transit uses GTFS feeds, subway/metro lines only (buses are rerouted on race day), with waits from scheduled frequencies rather than timetables. Walking is a straight-line estimate by default, with an optional self-hosted OSRM foot profile (`OSRM_WALK_URL`). Feeds are fetched on the host with `deploy/scripts/fetch-gtfs.sh` into `/srv/cheersquad/gtfs`, mounted as `GTFS_DIR`; with none, transit falls back to the straight-line stub.
 - Closures: v1 plan is that users click crossing points on the map, and `travel.Closures` blocks legs that cross the course elsewhere
