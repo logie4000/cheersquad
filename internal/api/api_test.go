@@ -45,6 +45,23 @@ func requestWith(t *testing.T, cfg Config, gpxBody, params string) *httptest.Res
 	return rec
 }
 
+// httptestPlan sends a small valid plan request straight to handlePlan
+// with the given gate.
+func httptestPlan(t *testing.T, g *gate) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("gpx", "course.gpx")
+	fw.Write([]byte(straightGPX))
+	mw.WriteField("params", `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}}`)
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/plan", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	handlePlan(rec, req, Config{}, g)
+	return rec
+}
+
 func TestPlanEndToEnd(t *testing.T) {
 	params := `{
 		"runner": {"finishSeconds": 3000},
@@ -369,7 +386,7 @@ func TestPlanStopsWhenContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	p := Params{Runner: Runner{FinishSeconds: 3000}, Spectator: Spectator{Mode: travel.Walk}}
-	if _, err := Plan(ctx, track, p, Config{}); err == nil || !strings.Contains(err.Error(), "longer than") {
+	if _, err := Plan(ctx, track, p, Config{}); err == nil || !strings.Contains(err.Error(), "too long") {
 		t.Fatalf("got %v, want timeout error", err)
 	}
 }

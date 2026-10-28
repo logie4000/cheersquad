@@ -43,9 +43,19 @@ const (
 	MaxStopsLimit = 50
 	// MaxMarks caps pinned spots, excluded areas and crossings each.
 	MaxMarks = 50
-	// MaxConcurrentPlans is how many plans may run at once; more get a 503
-	// rather than queueing up CPU and memory.
+	// MaxConcurrentPlans is how many plans may run at once. A typical plan
+	// takes a few to a few tens of milliseconds, so more wait their turn.
 	MaxConcurrentPlans = 4
+	// MaxCrossingPlans is how many of the running plans may have crossing
+	// points. Closure checks make those up to a few hundred times slower,
+	// so this keeps slots free for everyone else.
+	MaxCrossingPlans = 2
+	// MaxQueuedPlans is how many requests may wait for a slot; beyond that
+	// they get a 503 straight away, which bounds the memory held by request
+	// bodies waiting in line.
+	MaxQueuedPlans = 32
+	// QueueWait is how long a request waits for a slot before a 503.
+	QueueWait = 10 * time.Second
 	// MaxFinishSeconds is 48 hours; slower than that is not a real pace and
 	// would make every pair of spots reachable.
 	MaxFinishSeconds = 48 * 3600
@@ -58,9 +68,12 @@ const (
 	// MaxClosurePoints is how finely the course is kept for checking whether
 	// a leg crosses it (every check walks all of it).
 	MaxClosurePoints = 2000
-	// PlanTimeout stops a plan that runs too long, within the server's 60s
-	// write timeout.
+	// PlanTimeout stops a plan that runs too long. QueueWait plus this stays
+	// within the server's 60s write timeout.
 	PlanTimeout = 30 * time.Second
+	// CrossingPlanTimeout is the shorter limit for plans with crossing
+	// points, so a slow one gives its slot back sooner.
+	CrossingPlanTimeout = 15 * time.Second
 )
 
 // Runner is the runner half of a plan request.
@@ -177,21 +190,13 @@ func Handler(cfg Config) http.Handler {
 	if catalog == nil {
 		catalog = races.Default
 	}
-	busy := make(chan struct{}, MaxConcurrentPlans)
+	g := newGate(MaxConcurrentPlans, MaxCrossingPlans, MaxQueuedPlans, QueueWait)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("POST /api/plan", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case busy <- struct{}{}:
-			defer func() { <-busy }()
-		default:
-			w.Header().Set("Retry-After", "5")
-			writeError(w, http.StatusServiceUnavailable, errors.New("server busy, try again in a few seconds"))
-			return
-		}
-		handlePlan(w, r, cfg)
+		handlePlan(w, r, cfg, g)
 	})
 	mux.HandleFunc("GET /api/races", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -212,12 +217,32 @@ func Handler(cfg Config) http.Handler {
 
 // handlePlan expects multipart/form-data with a "gpx" file and a "params"
 // JSON field.
-func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
+func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config, g *gate) {
+	leave, ok := g.join()
+	if !ok {
+		writeBusy(w)
+		return
+	}
+	defer leave()
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUpload)
 	if err := r.ParseMultipartForm(MaxUpload); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("expected multipart form with gpx and params: %w", err))
 		return
 	}
+	var p Params
+	if err := json.Unmarshal([]byte(r.FormValue("params")), &p); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("params: %w", err))
+		return
+	}
+	crossings := len(p.Crossings) > 0
+	release, ok := g.enter(r.Context(), crossings)
+	if !ok {
+		writeBusy(w)
+		return
+	}
+	defer release()
+	// The GPX is parsed only once a slot is free, since a large track takes
+	// far more memory parsed than as raw bytes.
 	f, _, err := r.FormFile("gpx")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, errors.New("missing gpx file"))
@@ -229,12 +254,11 @@ func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	var p Params
-	if err := json.Unmarshal([]byte(r.FormValue("params")), &p); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("params: %w", err))
-		return
+	timeout := PlanTimeout
+	if crossings {
+		timeout = CrossingPlanTimeout
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), PlanTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	resp, err := Plan(ctx, track, p, cfg)
 	if err != nil {
@@ -333,7 +357,7 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		},
 	)
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("planning took longer than %s; try wider spacing or fewer crossings", PlanTimeout)
+		return nil, errors.New("planning took too long; try wider spacing or fewer crossings")
 	}
 	legs := make([][]travel.Step, len(plan.Stops))
 	prev := p.Spectator.Start
@@ -465,6 +489,11 @@ func covers(n travel.Network, start geo.LatLon, course []geo.LatLon) bool {
 		}
 	}
 	return false
+}
+
+func writeBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
+	writeError(w, http.StatusServiceUnavailable, errors.New("server busy, try again in a few seconds"))
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
