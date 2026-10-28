@@ -11,11 +11,14 @@ import (
 	"time"
 
 	"github.com/logie4000/cheersquad/internal/api"
+	"github.com/logie4000/cheersquad/internal/travel"
 )
 
 func main() {
 	addr := flag.String("addr", envOr("ADDR", ":8080"), "listen address")
 	static := flag.String("static", envOr("STATIC_DIR", "web/dist"), "directory of built UI files")
+	gtfsDir := flag.String("gtfs-dir", envOr("GTFS_DIR", ""), "directory of GTFS feeds for subway routing (empty: straight-line transit estimate)")
+	osrmWalk := flag.String("osrm-walk-url", envOr("OSRM_WALK_URL", ""), "OSRM server with a foot profile for walking times (empty: straight-line estimate)")
 	healthcheck := flag.Bool("healthcheck", false, "probe /api/healthz on addr and exit (for Docker HEALTHCHECK)")
 	flag.Parse()
 
@@ -23,8 +26,14 @@ func main() {
 		os.Exit(probe(*addr))
 	}
 
+	cfg := api.Config{Networks: loadNetworks(*gtfsDir)}
+	if *osrmWalk != "" {
+		cfg.Walk = &travel.OSRM{BaseURL: *osrmWalk}
+		log.Printf("walking times from OSRM at %s", *osrmWalk)
+	}
+
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.Handler())
+	mux.Handle("/api/", api.Handler(cfg))
 	mux.Handle("/", spa(*static))
 
 	srv := &http.Server{
