@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -86,12 +87,31 @@ func TestPlanRejectsBadInput(t *testing.T) {
 		"bad json":       {straightGPX, `{`},
 		"bad mode":       {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "fly"}}`},
 		"no finish time": {straightGPX, `{"spectator": {"mode": "walk"}}`},
+		"bad coords":     {`<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="NaN" lon="0"/></trkseg></trk></gpx>`, good},
+		// Roughly 111 km due north.
+		"too long":       {`<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="1" lon="0"/></trkseg></trk></gpx>`, good},
+		"certified long": {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "certifiedMeters": 1e9}`},
+		"tiny spacing":   {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "spacingMeters": 0.01}`},
+		"many stops":     {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "maxStops": 1000000}`},
+		"slow finish":    {straightGPX, `{"runner": {"finishSeconds": 1e9}, "spectator": {"mode": "walk"}}`},
+		"many weights":   {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "mileWeights": {` + mileWeights(MaxMileWeights+1) + `}}`},
+		"negative stops": {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "maxStops": -1}`},
+		"bad start":      {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk", "start": {"lat": 200, "lon": 0}}}`},
+		"too many pins":  {straightGPX, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}, "pinned": [` + strings.Repeat(`{"lat":0,"lon":0},`, MaxMarks) + `{"lat":0,"lon":0}]}`},
 	}
 	for name, c := range cases {
 		rec := request(t, c.gpx, c.params)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "error") {
 			t.Errorf("%s: status %d body %s", name, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestPlanRejectsOversizeUpload(t *testing.T) {
+	big := "<gpx>" + strings.Repeat(" ", MaxUpload) + "</gpx>"
+	rec := request(t, big, `{"runner": {"finishSeconds": 3000}, "spectator": {"mode": "walk"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
 	}
 }
 
@@ -292,7 +312,7 @@ func TestPlanTransitRaceDay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return Plan(track, p, cfg)
+		return Plan(context.Background(), track, p, cfg)
 	}
 	for day, want := range map[string]string{
 		"":         "Test Metro (Sunday schedule)",
@@ -315,3 +335,41 @@ func TestPlanTransitRaceDay(t *testing.T) {
 type weekdayNet struct{ courseNet }
 
 func (weekdayNet) Name() string { return "Weekday Metro" }
+
+func mileWeights(n int) string {
+	var b strings.Builder
+	for i := range n {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `"%d": 1`, i)
+	}
+	return b.String()
+}
+
+func TestThin(t *testing.T) {
+	var pts []geo.LatLon
+	for i := range 10_001 {
+		pts = append(pts, geo.LatLon{Lat: float64(i) / 1e4})
+	}
+	got := thin(pts, 2000)
+	if len(got) > 2000 || got[0] != pts[0] || got[len(got)-1] != pts[len(pts)-1] {
+		t.Fatalf("thin: %d points, ends %v %v", len(got), got[0], got[len(got)-1])
+	}
+	if short := pts[:5]; len(thin(short, 2000)) != 5 {
+		t.Fatal("thin changed a short course")
+	}
+}
+
+func TestPlanStopsWhenContextEnds(t *testing.T) {
+	track, err := gpx.Parse(strings.NewReader(straightGPX))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p := Params{Runner: Runner{FinishSeconds: 3000}, Spectator: Spectator{Mode: travel.Walk}}
+	if _, err := Plan(ctx, track, p, Config{}); err == nil || !strings.Contains(err.Error(), "longer than") {
+		t.Fatalf("got %v, want timeout error", err)
+	}
+}

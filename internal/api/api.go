@@ -4,11 +4,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/logie4000/cheersquad/internal/candidates"
 	"github.com/logie4000/cheersquad/internal/geo"
@@ -19,9 +21,47 @@ import (
 	"github.com/logie4000/cheersquad/internal/travel"
 )
 
-// MaxUpload caps the request body. Marathon GPX files with dense track
-// points are typically 1-5 MB.
-const MaxUpload = 20 << 20
+// MaxUpload caps the request body (GPX plus params). Course GPX files are
+// typically under 250 KB; a per-second watch recording of a marathon is
+// a few MB. Keep in step with client_max_body_size in the Nginx snippet.
+const MaxUpload = 3 << 20
+
+// Limits on a single plan request. The planner keeps a travel time for
+// every pair of candidates, so memory and time grow with the square of the
+// candidate count; these keep one request from exhausting the container.
+const (
+	// MaxCourseMeters allows ultras up to 100 km.
+	MaxCourseMeters = 100_000
+	// MaxPoints is far more than any real course needs (a marathon recorded
+	// every second is about 15k points).
+	MaxPoints = 200_000
+	// MinSpacingMeters is the closest candidate spots may be.
+	MinSpacingMeters = 50
+	// MaxCandidates bounds the planner's pairwise table.
+	MaxCandidates = 2500
+	// MaxStopsLimit caps an explicit stop limit (0 still means no limit).
+	MaxStopsLimit = 50
+	// MaxMarks caps pinned spots, excluded areas and crossings each.
+	MaxMarks = 50
+	// MaxConcurrentPlans is how many plans may run at once; more get a 503
+	// rather than queueing up CPU and memory.
+	MaxConcurrentPlans = 4
+	// MaxFinishSeconds is 48 hours; slower than that is not a real pace and
+	// would make every pair of spots reachable.
+	MaxFinishSeconds = 48 * 3600
+	// MaxMileWeights caps the per-mile weight map.
+	MaxMileWeights = 200
+	// MaxPrefetchPoints is the most points whose pairwise walking times are
+	// fetched up front; beyond it they are fetched on demand, after the
+	// planner's straight-line prefilter.
+	MaxPrefetchPoints = 1500
+	// MaxClosurePoints is how finely the course is kept for checking whether
+	// a leg crosses it (every check walks all of it).
+	MaxClosurePoints = 2000
+	// PlanTimeout stops a plan that runs too long, within the server's 60s
+	// write timeout.
+	PlanTimeout = 30 * time.Second
+)
 
 // Runner is the runner half of a plan request.
 type Runner struct {
@@ -137,11 +177,20 @@ func Handler(cfg Config) http.Handler {
 	if catalog == nil {
 		catalog = races.Default
 	}
+	busy := make(chan struct{}, MaxConcurrentPlans)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("POST /api/plan", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case busy <- struct{}{}:
+			defer func() { <-busy }()
+		default:
+			w.Header().Set("Retry-After", "5")
+			writeError(w, http.StatusServiceUnavailable, errors.New("server busy, try again in a few seconds"))
+			return
+		}
 		handlePlan(w, r, cfg)
 	})
 	mux.HandleFunc("GET /api/races", func(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +234,9 @@ func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("params: %w", err))
 		return
 	}
-	resp, err := Plan(track, p, cfg)
+	ctx, cancel := context.WithTimeout(r.Context(), PlanTimeout)
+	defer cancel()
+	resp, err := Plan(ctx, track, p, cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -194,10 +245,14 @@ func handlePlan(w http.ResponseWriter, r *http.Request, cfg Config) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// Plan runs the whole pipeline on a parsed track.
-func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
+// Plan runs the whole pipeline on a parsed track. When ctx ends, travel
+// lookups stop and Plan returns an error.
+func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Response, error) {
 	mode, err := travel.ParseMode(string(p.Spectator.Mode))
 	if err != nil {
+		return nil, err
+	}
+	if err := checkLimits(track, p); err != nil {
 		return nil, err
 	}
 	if p.CertifiedMeters > 0 {
@@ -231,11 +286,14 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		Excluded:    p.Excluded,
 		MileWeights: p.MileWeights,
 	})
+	if len(nodes) > MaxCandidates {
+		return nil, fmt.Errorf("too many candidate spots (%d, max %d); increase spacing or pin fewer spots", len(nodes), MaxCandidates)
+	}
 
 	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
-		walk = travel.Closures{Inner: walk, Course: track.Points, Crossings: p.Crossings}
+		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
 	}
 	var provider travel.Provider = walk
 	if rt.net != nil {
@@ -249,10 +307,18 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		if s, ok := provider.(*travel.Subway); ok {
 			pts = append(pts, s.StationsNear(pts)...)
 		}
-		pf.Prefetch(append(pts, p.Crossings...))
+		pts = append(pts, p.Crossings...)
+		if len(pts) <= MaxPrefetchPoints {
+			pf.Prefetch(pts)
+		}
 	}
 	provider = &travel.Cached{Inner: provider}
-	travelFn := func(a, b geo.LatLon) (float64, bool) { return provider.Duration(a, b, mode) }
+	travelFn := func(a, b geo.LatLon) (float64, bool) {
+		if ctx.Err() != nil {
+			return 0, false
+		}
+		return provider.Duration(a, b, mode)
+	}
 
 	plan := planner.Solve(
 		planner.Start{Pos: p.Spectator.Start, Time: p.Spectator.StartTimeSeconds},
@@ -266,6 +332,9 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 			StopPenalty: p.StopPenalty,
 		},
 	)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("planning took longer than %s; try wider spacing or fewer crossings", PlanTimeout)
+	}
 	legs := make([][]travel.Step, len(plan.Stops))
 	prev := p.Spectator.Start
 	for i, st := range plan.Stops {
@@ -284,6 +353,62 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		Routing:    rt.label,
 		Legs:       legs,
 	}, nil
+}
+
+// checkLimits rejects requests big enough to exhaust memory or CPU, and
+// coordinates that are not real places.
+func checkLimits(track *gpx.Track, p Params) error {
+	if n := len(track.Points); n > MaxPoints {
+		return fmt.Errorf("course has %d points (max %d)", n, MaxPoints)
+	}
+	length := track.Length()
+	if p.CertifiedMeters > 0 {
+		length = p.CertifiedMeters
+	}
+	if length > MaxCourseMeters || track.Length() > MaxCourseMeters {
+		return fmt.Errorf("course is longer than %d km", MaxCourseMeters/1000)
+	}
+	if p.SpacingMeters > 0 && p.SpacingMeters < MinSpacingMeters {
+		return fmt.Errorf("spacing must be at least %d m", MinSpacingMeters)
+	}
+	if p.Runner.FinishSeconds > MaxFinishSeconds {
+		return fmt.Errorf("finish time must be under %d hours", MaxFinishSeconds/3600)
+	}
+	if len(p.MileWeights) > MaxMileWeights {
+		return fmt.Errorf("at most %d mile weights", MaxMileWeights)
+	}
+	if p.MaxStops < 0 || p.MaxStops > MaxStopsLimit {
+		return fmt.Errorf("max stops must be between 0 (no limit) and %d", MaxStopsLimit)
+	}
+	if len(p.Pinned) > MaxMarks || len(p.Excluded) > MaxMarks || len(p.Crossings) > MaxMarks {
+		return fmt.Errorf("at most %d pinned spots, excluded areas and crossings each", MaxMarks)
+	}
+	pts := []geo.LatLon{p.Spectator.Start}
+	pts = append(pts, p.Pinned...)
+	pts = append(pts, p.Crossings...)
+	for _, a := range p.Excluded {
+		pts = append(pts, a.Center)
+	}
+	for _, pt := range pts {
+		if !gpx.ValidCoord(pt) {
+			return fmt.Errorf("invalid coordinates (%v, %v)", pt.Lat, pt.Lon)
+		}
+	}
+	return nil
+}
+
+// thin keeps at most max points of a polyline, evenly by index, always
+// keeping the last.
+func thin(pts []geo.LatLon, max int) []geo.LatLon {
+	if len(pts) <= max {
+		return pts
+	}
+	step := (len(pts) + max - 2) / (max - 1)
+	var out []geo.LatLon
+	for i := 0; i < len(pts)-1; i += step {
+		out = append(out, pts[i])
+	}
+	return append(out, pts[len(pts)-1])
 }
 
 // routing is the travel setup chosen for one request.

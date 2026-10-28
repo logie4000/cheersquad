@@ -165,3 +165,13 @@ func TestOSRMFallsBackWhenDown(t *testing.T) {
 		t.Fatalf("fallback after prefetch: %f %v", d, ok)
 	}
 }
+
+func TestOSRMMemoIsBounded(t *testing.T) {
+	o := &OSRM{MaxMemo: 2}
+	for i := range 5 {
+		o.store([2]geo.LatLon{{Lat: float64(i)}, {}}, cacheVal{ok: true})
+		if len(o.memo) > 2 {
+			t.Fatalf("memo grew to %d", len(o.memo))
+		}
+	}
+}

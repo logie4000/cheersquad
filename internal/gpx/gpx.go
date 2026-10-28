@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 
@@ -99,10 +100,15 @@ func ReadName(r io.Reader) (string, error) {
 	return "", nil
 }
 
-// New builds a Track from points, dropping consecutive duplicates.
+// New builds a Track from points, dropping consecutive duplicates. It
+// rejects coordinates that are not finite or out of range, which would
+// otherwise turn into nonsense (or infinite) distances.
 func New(pts []geo.LatLon) (*Track, error) {
 	t := &Track{}
-	for _, p := range pts {
+	for i, p := range pts {
+		if !ValidCoord(p) {
+			return nil, fmt.Errorf("gpx: point %d has invalid coordinates (%v, %v)", i+1, p.Lat, p.Lon)
+		}
 		if n := len(t.Points); n > 0 && t.Points[n-1] == p {
 			continue
 		}
@@ -159,4 +165,10 @@ func (t *Track) Locate(d float64) (i int, f float64) {
 func (t *Track) PointAt(d float64) geo.LatLon {
 	i, f := t.Locate(d)
 	return geo.Interpolate(t.Points[i], t.Points[i+1], f)
+}
+
+// ValidCoord reports whether p is a finite WGS84 coordinate.
+func ValidCoord(p geo.LatLon) bool {
+	return !math.IsNaN(p.Lat) && !math.IsNaN(p.Lon) &&
+		p.Lat >= -90 && p.Lat <= 90 && p.Lon >= -180 && p.Lon <= 180
 }

@@ -54,6 +54,28 @@ func TestParseRejectsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseRejectsInvalidCoordinates(t *testing.T) {
+	for _, pt := range []string{
+		`lat="NaN" lon="0"`, `lat="0" lon="Inf"`, `lat="91" lon="0"`, `lat="0" lon="-181"`,
+	} {
+		doc := `<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt ` + pt + `/></trkseg></trk></gpx>`
+		if _, err := Parse(strings.NewReader(doc)); err == nil {
+			t.Errorf("%s: expected error", pt)
+		}
+	}
+}
+
+func TestParseIgnoresEntities(t *testing.T) {
+	// encoding/xml neither fetches external entities nor expands DTD
+	// entities, so an XXE or entity-expansion file is just a parse error.
+	doc := `<?xml version="1.0"?>
+<!DOCTYPE gpx [<!ENTITY a "0.01"><!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="&a;" lon="&xxe;"/></trkseg></trk></gpx>`
+	if _, err := Parse(strings.NewReader(doc)); err == nil {
+		t.Fatal("expected entity references to be rejected")
+	}
+}
+
 func TestCalibrateAndPointAt(t *testing.T) {
 	tr, _ := Parse(strings.NewReader(sample))
 	tr.Calibrate(2000)
