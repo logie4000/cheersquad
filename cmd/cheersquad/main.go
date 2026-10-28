@@ -26,7 +26,8 @@ func main() {
 		os.Exit(probe(*addr))
 	}
 
-	cfg := api.Config{Networks: loadNetworks(*gtfsDir)}
+	nets := loadNetworks(*gtfsDir)
+	cfg := api.Config{Networks: nets[api.Sunday], DayNetworks: nets}
 	if *osrmWalk != "" {
 		cfg.Walk = &travel.OSRM{BaseURL: *osrmWalk}
 		log.Printf("walking times from OSRM at %s", *osrmWalk)

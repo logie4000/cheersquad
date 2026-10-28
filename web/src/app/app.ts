@@ -55,6 +55,7 @@ export class App implements OnInit {
     gunTime: '07:00',
     spectatorStart: '06:45',
     mode: 'walk' as PlanForm['mode'],
+    raceDay: 'sunday' as PlanForm['raceDay'],
     bufferMinutes: 3,
     maxStops: 0,
     lateMilesFrom: this.fb.control<number | null>(null),
@@ -110,6 +111,8 @@ export class App implements OnInit {
     const id = (event.target as HTMLSelectElement).value;
     this.raceId.set(id);
     if (!id) return;
+    const race = this.races().find((r) => r.id === id);
+    this.form.controls.raceDay.setValue(race?.day ?? 'sunday');
     this.error.set(null);
     this.api.raceGpx(id).subscribe({
       next: (gpx) => {

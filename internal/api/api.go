@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/logie4000/cheersquad/internal/candidates"
 	"github.com/logie4000/cheersquad/internal/geo"
@@ -41,6 +42,42 @@ type Spectator struct {
 	Mode             travel.Mode `json:"mode"`
 	// BufferSeconds defaults to 180.
 	BufferSeconds *float64 `json:"bufferSeconds"`
+	// RaceDay picks the transit timetable; empty means Sunday.
+	RaceDay RaceDay `json:"raceDay"`
+}
+
+// RaceDay is the kind of day a race is run on, which decides the transit
+// timetable: most marathons are on a Sunday, but Boston is on a Monday
+// and the T runs its weekday schedule.
+type RaceDay string
+
+const (
+	Sunday   RaceDay = "sunday"
+	Saturday RaceDay = "saturday"
+	Weekday  RaceDay = "weekday"
+)
+
+// RaceDays are the valid race days, in the order the UI lists them.
+var RaceDays = []RaceDay{Sunday, Saturday, Weekday}
+
+// label is the day as the routing line shows it: "Sunday schedule".
+func (d RaceDay) label() string {
+	if d == Weekday {
+		return "weekday"
+	}
+	return strings.ToUpper(string(d[:1])) + string(d[1:])
+}
+
+func parseRaceDay(s RaceDay) (RaceDay, error) {
+	if s == "" {
+		return Sunday, nil
+	}
+	for _, d := range RaceDays {
+		if s == d {
+			return d, nil
+		}
+	}
+	return "", fmt.Errorf("unknown race day %q (want sunday, saturday or weekday)", s)
 }
 
 // Params is the JSON "params" part of POST /api/plan.
@@ -74,9 +111,12 @@ type Response struct {
 
 // Config is what the server knows beyond a single request.
 type Config struct {
-	// Networks are the subway systems available for transit mode. The
-	// first that covers the course is used.
+	// Networks are the subway systems available for transit mode, on
+	// their Sunday timetable. The first that covers the course is used.
 	Networks []travel.Network
+	// DayNetworks are the same systems on other race days' timetables.
+	// A day with none uses Networks.
+	DayNetworks map[RaceDay][]travel.Network
 	// Walk times walking, for walk mode and the walking parts of transit.
 	// Nil means the straight-line stub. If it is a travel.Prefetcher it is
 	// warmed with every point a plan may ask about before solving.
@@ -180,6 +220,10 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 	if buffer < 0 {
 		return nil, errors.New("buffer cannot be negative")
 	}
+	day, err := parseRaceDay(p.Spectator.RaceDay)
+	if err != nil {
+		return nil, err
+	}
 
 	nodes := candidates.Generate(track, profile, candidates.Options{
 		Spacing:     p.SpacingMeters,
@@ -188,7 +232,7 @@ func Plan(track *gpx.Track, p Params, cfg Config) (*Response, error) {
 		MileWeights: p.MileWeights,
 	})
 
-	rt := chooseRouting(cfg, mode, p.Spectator.Start, track.Points)
+	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
 		walk = travel.Closures{Inner: walk, Course: track.Points, Crossings: p.Crossings}
@@ -251,7 +295,7 @@ type routing struct {
 	label string
 }
 
-func chooseRouting(cfg Config, mode travel.Mode, start geo.LatLon, course []geo.LatLon) routing {
+func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, course []geo.LatLon) routing {
 	stub := travel.Haversine{}
 	walk, walkName := cfg.Walk, "straight-line estimate"
 	if walk == nil {
@@ -265,13 +309,17 @@ func chooseRouting(cfg Config, mode travel.Mode, start geo.LatLon, course []geo.
 	case travel.Walk:
 		return routing{walk: walk, label: "Walking: " + walkName}
 	case travel.Transit:
-		for _, n := range cfg.Networks {
+		nets, schedule := cfg.DayNetworks[day], day
+		if len(nets) == 0 {
+			nets, schedule = cfg.Networks, Sunday
+		}
+		for _, n := range nets {
 			if covers(n, start, course) {
-				return routing{walk: walk, net: n, label: fmt.Sprintf("Subway: %s, walking: %s", n.Name(), walkName)}
+				return routing{walk: walk, net: n, label: fmt.Sprintf("Subway: %s (%s schedule), walking: %s", n.Name(), schedule.label(), walkName)}
 			}
 		}
 		why := "no subway data covers this course"
-		if len(cfg.Networks) == 0 {
+		if len(nets) == 0 {
 			why = "no subway data loaded"
 		}
 		return routing{walk: stub, label: "Straight-line estimate (" + why + ")"}

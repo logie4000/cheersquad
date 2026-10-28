@@ -25,10 +25,10 @@ func TestCatalogList(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Race{
-		{"zeta", "Alpha City Marathon"}, // metadata name, trimmed
-		{"bravo", "bravo half"},         // trk fallback, case-insensitive sort
-		{"broken", "broken"},            // parse error falls back to file name
-		{"charlie", "charlie"},          // no name falls back to file name
+		{ID: "zeta", Name: "Alpha City Marathon"}, // metadata name, trimmed
+		{ID: "bravo", Name: "bravo half"},         // trk fallback, case-insensitive sort
+		{ID: "broken", Name: "broken"},            // parse error falls back to file name
+		{ID: "charlie", Name: "charlie"},          // no name falls back to file name
 	}
 	got := c.List()
 	if len(got) != len(want) {
@@ -66,5 +66,18 @@ func TestEmptyCatalog(t *testing.T) {
 func TestDefaultLoads(t *testing.T) {
 	if Default == nil || Default.List() == nil {
 		t.Fatal("default catalog should load")
+	}
+}
+
+// Boston is on a Monday, so the UI should default to the weekday schedule.
+func TestBostonIsOnAWeekday(t *testing.T) {
+	for _, r := range Default.List() {
+		want := ""
+		if r.ID == "boston-2025" {
+			want = "weekday"
+		}
+		if r.Day != want {
+			t.Errorf("%s: day %q, want %q", r.ID, r.Day, want)
+		}
 	}
 }

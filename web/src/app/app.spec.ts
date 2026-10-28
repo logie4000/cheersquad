@@ -84,6 +84,26 @@ describe('App', () => {
       expect(app.error()).toBeNull();
     });
 
+    it("picks the race's timetable day, Sunday unless it says otherwise", () => {
+      const fixture = render();
+      http.expectOne('api/races').flush([
+        { id: 'boston', name: 'Boston Marathon', day: 'weekday' },
+        { id: 'nyc', name: 'New York City Marathon' },
+      ]);
+      fixture.detectChanges();
+      const app = fixture.componentInstance;
+      const select = (fixture.nativeElement as HTMLElement).querySelector('select')!;
+      for (const [id, day] of [
+        ['boston', 'weekday'],
+        ['nyc', 'sunday'],
+      ]) {
+        select.value = id;
+        select.dispatchEvent(new Event('change'));
+        http.expectOne(`api/races/${id}`).flush(GPX);
+        expect(app.form.controls.raceDay.value).toBe(day);
+      }
+    });
+
     it('shows an error when a race GPX fails to load', () => {
       const fixture = render();
       http.expectOne('api/races').flush([{ id: 'boston', name: 'Boston Marathon' }]);
