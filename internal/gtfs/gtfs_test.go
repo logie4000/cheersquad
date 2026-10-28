@@ -419,9 +419,9 @@ func TestRidePathsFollowShapes(t *testing.T) {
 	}
 }
 
-// Light rail is kept by default, since some systems file subway-like lines
-// under it (Boston's Green Line); buses still never are.
-func TestLightRailKept(t *testing.T) {
+// fixtureWith copies the fixture to a temp dir with routes.txt edited.
+func fixtureWith(t *testing.T, oldRoute, newRoute string) string {
+	t.Helper()
 	dir := t.TempDir()
 	entries, err := os.ReadDir(fixture)
 	if err != nil {
@@ -433,18 +433,52 @@ func TestLightRailKept(t *testing.T) {
 			t.Fatal(err)
 		}
 		if e.Name() == "routes.txt" {
-			b = []byte(strings.Replace(string(b), "401,M,", "0,M,", 1))
+			if !strings.Contains(string(b), oldRoute) {
+				t.Fatalf("routes.txt has no %q", oldRoute)
+			}
+			b = []byte(strings.Replace(string(b), oldRoute, newRoute, 1))
 		}
 		if err := os.WriteFile(filepath.Join(dir, e.Name()), b, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	n := load(t, dir, Options{})
+	return dir
+}
+
+// Light rail is kept by default, since some systems file subway-like lines
+// under it (Boston's Green Line); buses still never are.
+func TestLightRailKept(t *testing.T) {
+	n := load(t, fixtureWith(t, "401,M,", "0,M,"), Options{})
 	idx := indexes(t, n)
 	if r := n.Rides(idx["W"], idx["F"]); len(r) != 1 || r[0].Line != "M" {
 		t.Fatalf("light rail M should be kept: %+v", r)
 	}
 	if _, ok := idx["Z"]; ok {
 		t.Fatal("bus-only stop Z should not be a station")
+	}
+}
+
+// Rail (S-Bahn, RER, commuter rail) is kept only when it runs often enough.
+func TestRailKeptOnlyIfFrequent(t *testing.T) {
+	// M runs every 6 min per frequencies.txt, as suburban rail (109).
+	n := load(t, fixtureWith(t, "401,M,", "109,M,"), Options{})
+	idx := indexes(t, n)
+	if r := n.Rides(idx["W"], idx["F"]); len(r) != 1 || r[0].Line != "M" {
+		t.Fatalf("frequent rail M should be kept: %+v", r)
+	}
+	n = load(t, fixtureWith(t, "401,M,", "109,M,"), Options{FrequentHeadway: 300})
+	if _, ok := indexes(t, n)["F"]; ok {
+		t.Fatal("rail M every 6 min should be dropped with a 5 min limit")
+	}
+	// Red as rail (2) departs every 10 min: kept at the default 15 min,
+	// dropped at 5 min.
+	dir := fixtureWith(t, "1,R,", "2,R,")
+	idx = indexes(t, load(t, dir, Options{}))
+	if _, ok := idx["A"]; !ok {
+		t.Fatal("rail R every 10 min should be kept")
+	}
+	idx = indexes(t, load(t, dir, Options{FrequentHeadway: 300}))
+	if _, ok := idx["A"]; ok {
+		t.Fatal("rail R every 10 min should be dropped with a 5 min limit")
 	}
 }
