@@ -143,6 +143,10 @@
   </form>
 
   <section class="results">
+    <div class="print-only print-title">
+      <h2>Cheer Squad</h2>
+      <p>{{ printTitle() }}</p>
+    </div>
     <app-course-map
       [course]="course()"
       [marks]="marks()"
@@ -172,6 +176,17 @@
           </label>
         }
       </div>
+      @if (result()?.plan?.stops?.length) {
+        <button
+          type="button"
+          class="export"
+          [disabled]="preparingPdf()"
+          (click)="exportPdf()"
+          title="Opens the print dialog; choose Save as PDF"
+        >
+          {{ preparingPdf() ? 'Preparing…' : 'Export PDF' }}
+        </button>
+      }
     </div>
 
     @if (result(); as r) {

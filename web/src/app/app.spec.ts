@@ -2,6 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
+import { CourseMap } from './course-map';
 import { PlanResponse } from './plan';
 import { PlanService } from './plan.service';
 
@@ -231,6 +232,43 @@ describe('App', () => {
       expect(app.form.controls.lateFrom.value).toBe(32.2);
       expect(localStorage.getItem('cheersquad.unit')).toBe('km');
       expect(TestBed.createComponent(App).componentInstance.unit()).toBe('km');
+    });
+  });
+  describe('PDF export', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('shows Export PDF only once there is a plan', () => {
+      const fixture = TestBed.createComponent(App);
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('button.export')).toBeNull();
+      fixture.componentInstance.result.set(base);
+      fixture.detectChanges();
+      expect(el.querySelector('button.export')?.textContent?.trim()).toBe('Export PDF');
+    });
+
+    it('frames the map for print, titles the page and opens the print dialog', async () => {
+      const fit = vi.spyOn(CourseMap.prototype, 'fitForPrint').mockResolvedValue();
+      const restore = vi.spyOn(CourseMap.prototype, 'restoreAfterPrint').mockReturnValue();
+      const print = vi.spyOn(window, 'print').mockReturnValue();
+      const fixture = TestBed.createComponent(App);
+      const app = fixture.componentInstance;
+      app.gpxFile.set(new File([GPX], 'Spring 10K.gpx'));
+      app.form.patchValue({ goalFinish: '3:45:00', gunTime: '10:00', mode: 'transit' });
+      app.result.set(base);
+      fixture.detectChanges();
+
+      await app.exportPdf();
+      fixture.detectChanges();
+      expect(fit).toHaveBeenCalled();
+      expect(print).toHaveBeenCalled();
+      expect(app.preparingPdf()).toBe(false);
+      const title = (fixture.nativeElement as HTMLElement).querySelector('.print-title p');
+      expect(title?.textContent).toBe(
+        'Spring 10K · goal 3:45:00 · gun 10:00 · by transit from 06:45',
+      );
+      window.dispatchEvent(new Event('afterprint'));
+      expect(restore).toHaveBeenCalledTimes(1);
     });
   });
 });

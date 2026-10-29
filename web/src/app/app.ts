@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal, viewChild } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { CourseMap, DEFAULT_COURSE_COLOR } from './course-map';
 import {
@@ -29,6 +29,13 @@ type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
 const COURSE_COLOR_KEY = 'cheersquad.courseColor';
 const UNIT_KEY = 'cheersquad.unit';
 
+const MODE_TEXT: Record<PlanForm['mode'], string> = {
+  walk: 'walking',
+  bike: 'by bike',
+  transit: 'by transit',
+  drive: 'by car',
+};
+
 /** The remembered course color; storage can be blocked, so fall back quietly. */
 function savedCourseColor(): string {
   try {
@@ -55,6 +62,7 @@ function savedUnit(): DistanceUnit {
 export class App implements OnInit {
   private readonly api = inject(PlanService);
   private readonly fb = inject(NonNullableFormBuilder);
+  private readonly map = viewChild(CourseMap);
 
   readonly form = this.fb.group({
     goalFinish: '4:00:00',
@@ -90,6 +98,10 @@ export class App implements OnInit {
   readonly result = signal<PlanResponse | null>(null);
   readonly error = signal<string | null>(null);
   readonly loading = signal(false);
+  /** True while the map loads tiles at print size, before the print dialog opens. */
+  readonly preparingPdf = signal(false);
+  /** Which course, the runner's goal, and how you travel, for the printed plan's header. */
+  readonly printTitle = signal('');
   readonly courseColor = signal(savedCourseColor());
   readonly unit = signal<DistanceUnit>(this.form.controls.unit.value);
   readonly unitOptions: { value: DistanceUnit; label: string }[] = [
@@ -217,6 +229,39 @@ export class App implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  /**
+   * Exports the plan as a PDF through the browser's print dialog ("Save as
+   * PDF"). The print stylesheet keeps just the map and the sightings table.
+   */
+  async exportPdf(): Promise<void> {
+    if (this.preparingPdf()) return;
+    this.printTitle.set(this.planSummary());
+    this.preparingPdf.set(true);
+    const map = this.map();
+    try {
+      await map?.fitForPrint();
+    } finally {
+      this.preparingPdf.set(false);
+    }
+    window.addEventListener('afterprint', () => map?.restoreAfterPrint(), { once: true });
+    window.print();
+  }
+
+  /** e.g. "Boston Marathon · goal 3:45:00 · gun 10:00 · by transit from 09:30". */
+  planSummary(): string {
+    const f = this.form.getRawValue();
+    const race =
+      this.races().find((r) => r.id === this.raceId())?.name ??
+      this.gpxFile()?.name.replace(/\.gpx$/i, '') ??
+      'Your plan';
+    return [
+      race,
+      `goal ${f.goalFinish}`,
+      `gun ${f.gunTime}`,
+      `${MODE_TEXT[f.mode]} from ${f.spectatorStart}`,
+    ].join(' · ');
   }
 
   // Display helpers.

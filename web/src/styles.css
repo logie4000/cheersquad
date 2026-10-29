@@ -85,3 +85,35 @@ a {
   background: var(--badge-stop);
   color: #1d1d1f;
 }
+
+/* Printing (the PDF export) always uses the light palette and keeps colors. */
+@page {
+  margin: 0.5in;
+}
+@media print {
+  :root {
+    color-scheme: light;
+    --fg: #1d1d1f;
+    --bg: #ffffff;
+    --muted: #6b6b70;
+    --border: #d9d9de;
+    --accent: #2f5bd3;
+    --card: #ffffff;
+    --page: #ffffff;
+    --brand: darkblue;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  /* Map buttons and hover tooltips don't belong on paper; the OSM credit stays. */
+  .leaflet-control-zoom,
+  .leaflet-control-layers,
+  .leaflet-tooltip {
+    display: none;
+  }
+}
