@@ -46,26 +46,45 @@ func indexes(s string, n int) []int {
 	return out
 }
 
-// fakeOSRM walks at 1 m/s in a straight line, except to or from island.
+// fakeOSRM moves at 1 m/s in a straight line, except to or from island,
+// with the foot profile.
 func fakeOSRM(t *testing.T, routes, tables *int32) *httptest.Server {
+	return fakeOSRMProfile(t, "foot", routes, tables)
+}
+
+// corner is the point fakeOSRM's route geometry turns at between a and b,
+// as a street grid would.
+func corner(a, b geo.LatLon) geo.LatLon { return geo.LatLon{Lat: a.Lat, Lon: b.Lon} }
+
+func fakeOSRMProfile(t *testing.T, profile string, routes, tables *int32) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(r.URL.Path, "/")
-		if len(parts) != 5 || parts[2] != "v1" || parts[3] != "foot" {
+		if len(parts) != 5 || parts[2] != "v1" || parts[3] != profile {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 		ps := parseCoords(t, parts[4])
 		switch parts[1] {
 		case "route":
 			atomic.AddInt32(routes, 1)
-			if r.URL.Query().Get("overview") != "false" {
-				t.Errorf("route without overview=false")
+			q := r.URL.Query()
+			full := q.Get("overview") == "full" && q.Get("geometries") == "geojson"
+			if q.Get("overview") != "false" && !full {
+				t.Errorf("route with overview=%q geometries=%q", q.Get("overview"), q.Get("geometries"))
 			}
 			if ps[0] == island || ps[1] == island {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(`{"code":"NoRoute","message":"Impossible route between points"}`))
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "routes": []map[string]any{{"duration": geo.Distance(ps[0], ps[1])}}})
+			route := map[string]any{"duration": geo.Distance(ps[0], ps[1])}
+			if full {
+				var line [][2]float64
+				for _, p := range []geo.LatLon{ps[0], corner(ps[0], ps[1]), ps[1]} {
+					line = append(line, [2]float64{p.Lon, p.Lat})
+				}
+				route["geometry"] = map[string]any{"type": "LineString", "coordinates": line}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "routes": []map[string]any{route}})
 		case "table":
 			atomic.AddInt32(tables, 1)
 			if len(ps) > 4 {
@@ -117,6 +136,76 @@ func TestOSRMRoute(t *testing.T) {
 	}
 	if o.MaxSpeed(Walk) != 2 || o.String() != "OSRM foot routing" {
 		t.Fatalf("bound %f name %q", o.MaxSpeed(Walk), o.String())
+	}
+}
+
+func TestOSRMStepsFollowStreets(t *testing.T) {
+	var routes, tables int32
+	srv := fakeOSRM(t, &routes, &tables)
+	defer srv.Close()
+	o := &OSRM{BaseURL: srv.URL}
+	a, b := geo.LatLon{Lat: 0.001, Lon: 0.002}, geo.LatLon{Lat: 0.003, Lon: -0.001}
+	steps, ok := o.Steps(a, b, Walk)
+	if !ok || len(steps) != 1 {
+		t.Fatalf("steps: %v %v", steps, ok)
+	}
+	st := steps[0]
+	want := []geo.LatLon{a, a, corner(a, b), b, b}
+	if st.Kind != StepWalk || len(st.Path) != len(want) {
+		t.Fatalf("step %+v, want path %v", st, want)
+	}
+	for i := range want {
+		if geo.Distance(st.Path[i], want[i]) > 0.5 {
+			t.Fatalf("path[%d] = %v, want %v", i, st.Path[i], want[i])
+		}
+	}
+	if d, _ := o.Duration(a, b, Walk); st.Seconds != d {
+		t.Fatalf("step %f s, duration %f s", st.Seconds, d)
+	}
+	// No route: no step. Another mode: a straight step with no path.
+	if _, ok := o.Steps(a, island, Walk); ok {
+		t.Fatal("NoRoute should have no steps")
+	}
+	if steps, ok := o.Steps(a, b, Bike); !ok || steps[0].Path != nil || steps[0].Kind != StepBike {
+		t.Fatalf("bike on a foot server: %+v", steps)
+	}
+}
+
+func TestOSRMStepsWhenDown(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	o := &OSRM{BaseURL: url, Mode: Drive}
+	steps, ok := o.Steps(geo.LatLon{}, geo.LatLon{Lat: 0.01}, Drive)
+	if !ok || len(steps) != 1 || steps[0].Path != nil || steps[0].Kind != StepDrive {
+		t.Fatalf("steps while down: %+v %v", steps, ok)
+	}
+}
+
+func TestOSRMDriveFactorAndOverhead(t *testing.T) {
+	var routes, tables int32
+	srv := fakeOSRMProfile(t, "car", &routes, &tables)
+	defer srv.Close()
+	o := &OSRM{BaseURL: srv.URL, Mode: Drive, Factor: 1.5, Overhead: 600}
+	a, b := geo.LatLon{}, geo.LatLon{Lat: 0.01}
+	want := geo.Distance(a, b)*1.5 + 600
+	if d, ok := o.Duration(a, b, Drive); !ok || math.Abs(d-want) > 0.5 {
+		t.Fatalf("drive: %f %v, want %f", d, ok, want)
+	}
+	o.Prefetch([]geo.LatLon{b, a})
+	if d, ok := o.Duration(b, a, Drive); !ok || math.Abs(d-want) > 0.5 {
+		t.Fatalf("drive after prefetch: %f %v, want %f", d, ok, want)
+	}
+	steps, ok := o.Steps(a, b, Drive)
+	if !ok || steps[0].Kind != StepDrive || len(steps[0].Path) < 2 || math.Abs(steps[0].Seconds-want) > 0.5 {
+		t.Fatalf("drive steps: %+v", steps)
+	}
+	// Walking is the stub's on a car server.
+	if d, _ := o.Duration(a, b, Walk); d != geo.Distance(a, b)*1.3/DefaultSpeeds[Walk] {
+		t.Fatalf("walk on a car server: %f", d)
+	}
+	if o.MaxSpeed(Drive) != 40/1.5 || o.String() != "OSRM car routing" {
+		t.Fatalf("bound %f name %q", o.MaxSpeed(Drive), o.String())
 	}
 }
 

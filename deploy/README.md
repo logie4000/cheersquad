@@ -128,10 +128,55 @@ restart; a failed download leaves the old file in place. With no feeds, or
 a course outside every feed's area, transit falls back to the straight-line
 estimate, and the plan says which routing it used.
 
-Walking legs are straight-line estimates by default. For street-network
-walking times, run a self-hosted [OSRM](https://project-osrm.org/) with the
-foot profile and uncomment `OSRM_WALK_URL` in `docker-compose.yml`. It's
-optional.
+## Street routing (walking, biking, driving)
+
+By default walk, bike and drive legs are straight-line estimates, drawn as
+straight dashed lines. With street routing on, each leg is timed over the
+real street network and drawn street by street on the map, in Print and in
+Export PDF. It runs on [OSRM](https://project-osrm.org/), self-hosted next
+to the app: one small router per mode (OSRM's foot, bicycle and car
+profiles), built from OpenStreetMap data clipped to a box around each
+preloaded course. The public OSRM demo server isn't used; its usage policy
+doesn't allow an app's traffic.
+
+Build the data on the host (needs docker; it downloads the Geofabrik
+extracts, a few hundred MB each for the US states and Kanto, and caches them
+in `osrm/src`):
+
+```sh
+cd /srv/cheersquad
+deploy/scripts/build-osrm.sh                 # berlin boston chicago london nyc tokyo
+deploy/scripts/deploy.sh                     # starts the routers it finds and points the app at them
+docker logs cheersquad 2>&1 | grep -i osrm   # "walking routes from OSRM at ..."
+rm -rf osrm/src                              # optional: drop the downloads
+```
+
+`build-osrm.sh boston` adds or refreshes one city (the others stay);
+`NAME=URL@WEST,SOUTH,EAST,NORTH` adds any other Geofabrik extract clipped to
+that box. `OSRM_PROFILES="foot car"` builds only some modes. Each profile is
+swapped in only when its build succeeds; run `deploy/scripts/deploy.sh`
+afterwards to restart the routers on the new data.
+
+`deploy.sh` turns on the `osrm-foot`, `osrm-bicycle` and `osrm-car` services
+in `docker-compose.yml` for whichever profiles are built (via
+`COMPOSE_PROFILES` and the `OSRM_*_URL` lines it writes to `.env`). With
+none built nothing changes. If a router stops answering, plans fall back to
+straight-line estimates and the server logs it once.
+
+Footprint (rough, for the six preloaded cities): the build needs a few GB of
+free memory for a few minutes per profile (car is the smallest, foot the
+largest), and the finished data is about 1-2 GB on disk. The routers serve
+the files memory-mapped (`--mmap`), each capped at `OSRM_MEM_LIMIT` (1 GB by
+default). If the build is too big for the host, run the script on any
+machine with docker (`OSRM_DIR=./osrm deploy/scripts/build-osrm.sh`) and
+copy the `foot`, `bicycle` and `car` folders to `/srv/cheersquad/osrm/`.
+
+How times are adjusted: walking uses OSRM's times as they are. Biking adds
+20% for crowds and 2 minutes per stop to lock up the bike. Driving adds 50%
+for race-day traffic and 10 minutes per stop to park and walk to the
+course. Known limit: OSRM doesn't know which roads the race closes. Marked
+crossing points still apply (a leg that would cross the course goes through
+one), but a driving route can follow a street the course uses.
 
 ## Logs and status
 

@@ -15,22 +15,35 @@ import (
 	"github.com/logie4000/cheersquad/internal/geo"
 )
 
-// OSRM times walking legs with an OSRM server's foot profile. Only mode Walk
-// is routed (the walking parts of transit are asked as Walk too); other
-// modes, and every leg while the server is unreachable, use Fallback, so a
-// plan always comes back.
+// OSRM times legs in one mode over the street network with an OSRM server
+// built for that mode's profile (foot, bicycle or car); each OSRM server
+// serves one profile. Only Mode is routed (the walking parts of transit are
+// asked as Walk too); other modes, and every leg while the server is
+// unreachable, use Fallback, so a plan always comes back.
 type OSRM struct {
 	// BaseURL is the server root, e.g. "http://osrm:5000".
 	BaseURL string
-	// Profile is the OSRM profile name. Empty means "foot".
+	// Mode is the mode this server routes. Empty means Walk.
+	Mode Mode
+	// Profile is the OSRM profile name in request URLs. Empty means foot,
+	// bicycle or car by Mode. (osrm-routed answers with its one dataset
+	// whatever the name.)
 	Profile string
 	// Client is the HTTP client. Nil means one with a 10 s timeout.
 	Client *http.Client
-	// Fallback answers when OSRM cannot, and for modes other than Walk.
+	// Fallback answers when OSRM cannot, and for modes other than Mode.
 	Fallback Haversine
-	// SpeedBound is the walking speed bound in m/s reported by MaxSpeed. It
-	// must exceed the profile's speed (OSRM foot is 5 km/h, ~1.4 m/s).
-	// Zero means 2.0.
+	// Factor multiplies OSRM's durations, which assume free-flowing streets
+	// (race-day traffic for cars). Zero means 1.
+	Factor float64
+	// Overhead is seconds added to every routed leg: parking a car or
+	// locking a bike and walking to the course. A leg detoured through a
+	// crossing point is two routed legs and gets it twice.
+	Overhead float64
+	// SpeedBound is the speed bound in m/s, before Factor, reported by
+	// MaxSpeed. It must exceed any speed the profile uses (OSRM foot is
+	// 5 km/h, ~1.4 m/s). Zero means 2.0 for Walk, 8.0 for Bike and 40 for
+	// Drive.
 	SpeedBound float64
 	// ChunkSize caps sources and destinations per /table request, so one
 	// request has at most 2*ChunkSize locations. Zero means 50, which fits
@@ -58,11 +71,33 @@ func (o *OSRM) String() string {
 	return fmt.Sprintf("OSRM %s routing", o.profile())
 }
 
-func (o *OSRM) profile() string {
-	if o.Profile == "" {
-		return "foot"
+func (o *OSRM) mode() Mode {
+	if o.Mode == "" {
+		return Walk
 	}
-	return o.Profile
+	return o.Mode
+}
+
+func (o *OSRM) profile() string {
+	if o.Profile != "" {
+		return o.Profile
+	}
+	switch o.mode() {
+	case Bike:
+		return "bicycle"
+	case Drive:
+		return "car"
+	}
+	return "foot"
+}
+
+// adjust turns an OSRM duration into a leg time.
+func (o *OSRM) adjust(s float64) float64 {
+	f := o.Factor
+	if f <= 0 {
+		f = 1
+	}
+	return s*f + o.Overhead
 }
 
 func (o *OSRM) client() *http.Client {
@@ -73,7 +108,7 @@ func (o *OSRM) client() *http.Client {
 }
 
 func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
-	if m != Walk {
+	if m != o.mode() {
 		return o.Fallback.Duration(a, b, m)
 	}
 	k := [2]geo.LatLon{a, b}
@@ -82,16 +117,16 @@ func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 	down := time.Now().Before(o.downUntil)
 	o.mu.Unlock()
 	if hit {
-		return v.s, v.ok
+		return o.adjust(v.s), v.ok
 	}
 	if down {
 		return o.Fallback.Duration(a, b, m)
 	}
-	s, err := o.route(a, b)
+	s, _, err := o.route(a, b, false)
 	switch {
 	case err == nil:
 		o.store(k, cacheVal{s, true})
-		return s, true
+		return o.adjust(s), true
 	case errors.Is(err, errNoRoute):
 		o.store(k, cacheVal{0, false})
 		return 0, false
@@ -126,7 +161,7 @@ func (o *OSRM) fail(err error) {
 	o.downUntil = time.Now().Add(osrmRetry)
 	if !o.logged {
 		o.logged = true
-		log.Printf("osrm: %v; falling back to straight-line walking estimates", err)
+		log.Printf("osrm %s: %v; falling back to straight-line estimates", o.profile(), err)
 	}
 }
 
@@ -168,19 +203,32 @@ func (o *OSRM) get(service, path string, q url.Values, out any) error {
 	return fmt.Errorf("osrm %s: status %d code %q: %s", service, resp.StatusCode, env.Code, env.Message)
 }
 
-func (o *OSRM) route(a, b geo.LatLon) (float64, error) {
+// route asks OSRM for the fastest a->b route: its raw duration and, if
+// path is true, its street geometry.
+func (o *OSRM) route(a, b geo.LatLon, path bool) (float64, []geo.LatLon, error) {
 	var r struct {
 		Routes []struct {
 			Duration float64 `json:"duration"`
+			Geometry struct {
+				Coordinates [][2]float64 `json:"coordinates"`
+			} `json:"geometry"`
 		} `json:"routes"`
 	}
-	if err := o.get("route", coords([]geo.LatLon{a, b}), url.Values{"overview": {"false"}}, &r); err != nil {
-		return 0, err
+	q := url.Values{"overview": {"false"}}
+	if path {
+		q = url.Values{"overview": {"full"}, "geometries": {"geojson"}}
+	}
+	if err := o.get("route", coords([]geo.LatLon{a, b}), q, &r); err != nil {
+		return 0, nil, err
 	}
 	if len(r.Routes) == 0 {
-		return 0, errNoRoute
+		return 0, nil, errNoRoute
 	}
-	return r.Routes[0].Duration, nil
+	var pts []geo.LatLon
+	for _, c := range r.Routes[0].Geometry.Coordinates {
+		pts = append(pts, geo.LatLon{Lat: c[1], Lon: c[0]})
+	}
+	return r.Routes[0].Duration, pts, nil
 }
 
 // Prefetch fills the cache with walking times between every ordered pair
@@ -263,25 +311,53 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 	return nil
 }
 
-// Steps is a single step: OSRM is asked for durations only, not paths.
+// Steps is a single step lasting Duration's time. For Mode it carries the
+// street route OSRM takes as its Path, from a to b (OSRM snaps the ends to
+// the nearest street, so a and b are added at the ends). Without a route,
+// because OSRM is down or the leg came from Fallback, Path is empty and the
+// map draws a straight line.
 func (o *OSRM) Steps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 	s, ok := o.Duration(a, b, m)
 	if !ok {
 		return nil, false
 	}
-	return []Step{{Kind: StepKindFor(m), FromPos: a, ToPos: b, Seconds: s}}, true
+	st := Step{Kind: StepKindFor(m), FromPos: a, ToPos: b, Seconds: s}
+	o.mu.Lock()
+	down := time.Now().Before(o.downUntil)
+	o.mu.Unlock()
+	if m == o.mode() && !down && a != b {
+		_, pts, err := o.route(a, b, true)
+		switch {
+		case err == nil && len(pts) > 0:
+			st.Path = append(append([]geo.LatLon{a}, pts...), b)
+		case err != nil && !errors.Is(err, errNoRoute):
+			o.fail(err)
+		}
+	}
+	return []Step{st}, true
 }
 
-// MaxSpeed is SpeedBound for Walk and Fallback's bound otherwise. While
-// OSRM is down Walk legs come from Fallback, whose walking bound (1.3 m/s by
-// default) is below SpeedBound's default.
+// MaxSpeed is SpeedBound / Factor for Mode and Fallback's bound otherwise.
+// Overhead only makes legs slower, so it is left out. While OSRM is down
+// legs come from Fallback, so its bound counts too.
 func (o *OSRM) MaxSpeed(m Mode) float64 {
-	if m != Walk {
+	if m != o.mode() {
 		return o.Fallback.MaxSpeed(m)
 	}
 	b := o.SpeedBound
 	if b <= 0 {
-		b = 2.0
+		switch m {
+		case Bike:
+			b = 8.0
+		case Drive:
+			b = 40
+		default:
+			b = 2.0
+		}
 	}
-	return max(b, o.Fallback.MaxSpeed(Walk))
+	f := o.Factor
+	if f <= 0 {
+		f = 1
+	}
+	return max(b/f, o.Fallback.MaxSpeed(m))
 }

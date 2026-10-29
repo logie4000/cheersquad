@@ -3,3 +3,5 @@
 gtfs/*
 !gtfs/.gitkeep
 __pycache__/
+# OSRM street-routing data is built on the host (deploy/scripts/build-osrm.sh).
+osrm/

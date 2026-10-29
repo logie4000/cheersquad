@@ -390,3 +390,54 @@ func TestPlanStopsWhenContextEnds(t *testing.T) {
 		t.Fatalf("got %v, want timeout error", err)
 	}
 }
+
+// streetRouter drives at 10 m/s along a two-segment "street" path through
+// a corner, and records Prefetch calls.
+type streetRouter struct {
+	prefetchWalk
+}
+
+func (streetRouter) Duration(a, b geo.LatLon, m travel.Mode) (float64, bool) {
+	return geo.Distance(a, b) / 10, true
+}
+
+func (r streetRouter) Steps(a, b geo.LatLon, m travel.Mode) ([]travel.Step, bool) {
+	s, _ := r.Duration(a, b, m)
+	path := []geo.LatLon{a, {Lat: a.Lat, Lon: b.Lon}, b}
+	return []travel.Step{{Kind: travel.StepDrive, FromPos: a, ToPos: b, Path: path, Seconds: s}}, true
+}
+
+func (streetRouter) String() string { return "test streets" }
+
+func TestPlanDriveUsesStreetRouter(t *testing.T) {
+	drive := &streetRouter{}
+	params := `{
+		"runner": {"finishSeconds": 3000},
+		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "drive", "bufferSeconds": 60, "startTimeSeconds": -600},
+		"certifiedMeters": 10000,
+		"spacingMeters": 1000
+	}`
+	rec := requestWith(t, Config{Drive: drive}, straightGPX, params)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Routing != "Driving: test streets" {
+		t.Fatalf("routing %q", resp.Routing)
+	}
+	if len(drive.points) == 0 {
+		t.Fatal("drive router was not prefetched")
+	}
+	if len(resp.Legs) == 0 || len(resp.Legs[0]) != 1 || len(resp.Legs[0][0].Path) != 3 {
+		t.Fatalf("legs should carry the street path: %+v", resp.Legs)
+	}
+	// Walking still uses the stub when only a drive router is set.
+	params = strings.Replace(params, `"drive"`, `"walk"`, 1)
+	rec = requestWith(t, Config{Drive: drive}, straightGPX, params)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Routing != "Walking: straight-line estimate" {
+		t.Fatalf("walk routing %q (%v)", resp.Routing, err)
+	}
+}
