@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal, viewChild } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { CourseMap, DEFAULT_COURSE_COLOR } from './course-map';
 import {
@@ -22,12 +22,20 @@ import {
   stepText,
   textOn,
 } from './plan';
+import { PdfPlan, PlanPdf } from './pdf-export';
 import { PlanService } from './plan.service';
 
 type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
 
 const COURSE_COLOR_KEY = 'cheersquad.courseColor';
 const UNIT_KEY = 'cheersquad.unit';
+
+const MODE_TEXT: Record<PlanForm['mode'], string> = {
+  walk: 'walking',
+  bike: 'by bike',
+  transit: 'by transit',
+  drive: 'by car',
+};
 
 /** The remembered course color; storage can be blocked, so fall back quietly. */
 function savedCourseColor(): string {
@@ -46,6 +54,21 @@ function savedUnit(): DistanceUnit {
   return 'mi';
 }
 
+/**
+ * Puts the map back once the user next touches the page. Chrome fires
+ * afterprint while its print dialog is still open and re-renders the preview
+ * from the live page when a setting changes, so restoring on afterprint
+ * printed a map whose tiles were still loading.
+ */
+function restoreOnNextInput(map: CourseMap | undefined): void {
+  const events = ['pointerdown', 'keydown', 'wheel'] as const;
+  const restore = () => {
+    for (const e of events) window.removeEventListener(e, restore, true);
+    map?.restoreAfterPrint();
+  };
+  for (const e of events) window.addEventListener(e, restore, { capture: true, passive: true });
+}
+
 @Component({
   selector: 'app-root',
   imports: [ReactiveFormsModule, CourseMap],
@@ -55,6 +78,8 @@ function savedUnit(): DistanceUnit {
 export class App implements OnInit {
   private readonly api = inject(PlanService);
   private readonly fb = inject(NonNullableFormBuilder);
+  private readonly map = viewChild(CourseMap);
+  private readonly pdf = inject(PlanPdf);
 
   readonly form = this.fb.group({
     goalFinish: '4:00:00',
@@ -90,6 +115,12 @@ export class App implements OnInit {
   readonly result = signal<PlanResponse | null>(null);
   readonly error = signal<string | null>(null);
   readonly loading = signal(false);
+  /** True while the map loads tiles at print size, before the print dialog opens. */
+  readonly preparingPrint = signal(false);
+  /** True while the PDF download is being drawn. */
+  readonly exportingPdf = signal(false);
+  /** Which course, the runner's goal, and how you travel, for the printed plan's header. */
+  readonly printTitle = signal('');
   readonly courseColor = signal(savedCourseColor());
   readonly unit = signal<DistanceUnit>(this.form.controls.unit.value);
   readonly unitOptions: { value: DistanceUnit; label: string }[] = [
@@ -217,6 +248,97 @@ export class App implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  /**
+   * Prints the plan through the browser's print dialog (which can also save
+   * a PDF). The print stylesheet keeps just the map and the sightings table.
+   */
+  async printPlan(): Promise<void> {
+    if (this.preparingPrint()) return;
+    this.printTitle.set(this.planSummary());
+    this.preparingPrint.set(true);
+    const map = this.map();
+    try {
+      await map?.fitForPrint();
+    } finally {
+      this.preparingPrint.set(false);
+    }
+    window.addEventListener('afterprint', () => restoreOnNextInput(map), { once: true });
+    window.print();
+  }
+
+  /** Downloads the plan as a PDF file, drawn in the page without the print dialog. */
+  async exportPdf(): Promise<void> {
+    const plan = this.pdfPlan();
+    if (!plan || this.exportingPdf()) return;
+    this.exportingPdf.set(true);
+    this.error.set(null);
+    try {
+      await this.pdf.save(plan);
+    } catch {
+      this.error.set("Couldn't make the PDF. Try Print and save as PDF instead.");
+    } finally {
+      this.exportingPdf.set(false);
+    }
+  }
+
+  /** The current plan as the PDF's text and map, in the chosen units. */
+  pdfPlan(): PdfPlan | null {
+    const r = this.result();
+    if (!r?.plan.stops.length) return null;
+    const n = r.plan.sightings;
+    const legs = this.legs();
+    return {
+      summary: this.planSummary(),
+      heading: `${n} sighting${n === 1 ? '' : 's'}`,
+      routing: r.routing ? `Routing: ${r.routing}` : undefined,
+      columns: [
+        '#',
+        this.unit() === 'km' ? 'Km' : 'Mile',
+        'Leave',
+        'Arrive',
+        'Runner passes',
+        'Wait',
+      ],
+      rows: r.plan.stops.map((s, i) => ({
+        cells: [
+          String(i + 1),
+          this.distance(s.node.dist),
+          this.clock(s.depart),
+          `${this.clock(s.arrive)} (${this.minutes(s.travel)} ${r.mode})`,
+          `${this.clock(s.node.tExpected)} (${this.clock(s.node.tFast)}–${this.clock(s.node.tSlow)})`,
+          this.minutes(s.wait),
+        ],
+        link: this.mapsLink(s.node.pos),
+        steps: legs[i],
+      })),
+      note:
+        "Leave times assume the runner is at the slow end of their window, so you can go sooner once you've seen them." +
+        (r.routing ? '' : ' Travel times are straight-line estimates for now, not real routes.'),
+      map: {
+        course: this.course(),
+        stops: r.plan.stops,
+        legs,
+        start: this.marks().start,
+        courseColor: this.courseColor(),
+      },
+    };
+  }
+
+  /** e.g. "Boston Marathon · goal 3:45:00 · gun 10:00 · by transit from 09:30". */
+  planSummary(): string {
+    const f = this.form.getRawValue();
+    const race =
+      this.races().find((r) => r.id === this.raceId())?.name ??
+      this.gpxFile()?.name.replace(/\.gpx$/i, '') ??
+      'Your plan';
+    return [
+      race,
+      `goal ${f.goalFinish}`,
+      `gun ${f.gunTime}`,
+      `${MODE_TEXT[f.mode]} from ${f.spectatorStart}`,
+    ].join(' · ');
   }
 
   // Display helpers.

@@ -195,3 +195,62 @@ tr.leg td {
   line-height: 1.35rem;
   text-align: center;
 }
+.exports {
+  display: flex;
+  gap: 0.5rem;
+}
+button.export {
+  padding: 0.3rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  background: none;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.print-only {
+  display: none;
+}
+
+/* The PDF export: just the map and the sightings table on white paper. */
+@media print {
+  :host {
+    max-width: none;
+    padding: 0;
+  }
+  header,
+  form.panel,
+  .units,
+  .exports {
+    display: none;
+  }
+  main {
+    display: block;
+  }
+  .print-only {
+    display: block;
+  }
+  .print-title h2 {
+    margin: 0;
+    color: var(--brand);
+  }
+  .print-title p {
+    margin: 0 0 0.5rem;
+  }
+  .results app-course-map {
+    height: auto;
+  }
+  .results-head {
+    margin-top: 0.75rem;
+  }
+  table {
+    font-size: 9pt;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  tr.has-leg {
+    break-after: avoid;
+  }
+}

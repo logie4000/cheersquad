@@ -27,8 +27,12 @@ import {
 // Subway steps use the feed's line color, so the course is a bright blue on a
 // white casing over grayscale tiles to stay distinct from transit colors.
 export const DEFAULT_COURSE_COLOR = '#0a5cff';
-const LEG = '#1d1d1f';
-const WALK = '#000000';
+export const LEG = '#1d1d1f';
+export const WALK = '#000000';
+export const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+export const TILE_ATTRIBUTION = '© OpenStreetMap contributors';
+/** How long to wait for map tiles before printing anyway. */
+const PRINT_TILE_WAIT_MS = 4000;
 
 /**
  * Leaflet map showing the course, the user's marks (start, pinned spots,
@@ -38,8 +42,31 @@ const WALK = '#000000';
 @Component({
   selector: 'app-course-map',
   template: '<div #map class="map"></div>',
-  styles:
-    ':host { display: block; } .map { height: 100%; min-height: 420px; border: 1px solid var(--border); border-radius: 8px; }',
+  // print-size is the printed map's size, applied on screen while tiles load
+  // for the PDF so Leaflet lays out exactly what the page will show.
+  styles: `
+    :host {
+      display: block;
+    }
+    .map {
+      height: 100%;
+      min-height: 420px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .map.print-size {
+      width: 7in;
+      height: 5in;
+      min-height: 0;
+    }
+    @media print {
+      .map {
+        width: 7in;
+        height: 5in;
+        min-height: 0;
+      }
+    }
+  `,
 })
 export class CourseMap implements AfterViewInit, OnDestroy {
   readonly course = input<LatLon[]>([]);
@@ -57,6 +84,8 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   private readonly markLayer = L.layerGroup();
   private readonly stopLayer = L.layerGroup();
   private courseLine?: L.Polyline;
+  /** The on-screen view to return to after printing. */
+  private screenView?: { center: L.LatLng; zoom: number };
 
   constructor() {
     effect(() => this.drawCourse(this.course()));
@@ -69,7 +98,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.map = L.map(this.el().nativeElement, { center: [39.5, -98.35], zoom: 4 });
     const osm = (className: string) =>
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      L.tileLayer(TILE_URL, {
         maxZoom: 19,
         className,
         attribution:
@@ -89,6 +118,37 @@ export class CourseMap implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.map?.remove();
+  }
+
+  /**
+   * Resizes the map to its printed size, frames the course and plan, and
+   * resolves once the tiles have loaded (or after a short wait).
+   */
+  async fitForPrint(): Promise<void> {
+    const map = this.map;
+    if (!map) return;
+    const el = this.el().nativeElement;
+    if (!this.screenView) this.screenView = { center: map.getCenter(), zoom: map.getZoom() };
+    el.classList.add('print-size');
+    map.invalidateSize({ pan: false });
+    const b = printBounds(this.course(), this.stops(), this.legs(), this.marks().start);
+    // Whole zoom levels can leave the course filling under half the page, so
+    // allow quarter steps just for this fit.
+    const snap = map.options.zoomSnap;
+    map.options.zoomSnap = 0.25;
+    if (b) map.fitBounds(b, { padding: [24, 24], animate: false });
+    map.options.zoomSnap = snap;
+    await tilesLoaded(map, PRINT_TILE_WAIT_MS);
+  }
+
+  /** Puts the map back the way it was on screen before fitForPrint. */
+  restoreAfterPrint(): void {
+    const map = this.map;
+    if (!map || !this.screenView) return;
+    this.el().nativeElement.classList.remove('print-size');
+    map.invalidateSize({ pan: false });
+    map.setView(this.screenView.center, this.screenView.zoom, { animate: false });
+    this.screenView = undefined;
   }
 
   private drawCourse(points: LatLon[]): void {
@@ -203,6 +263,44 @@ export class CourseMap implements AfterViewInit, OnDestroy {
       if (s.name) dot.bindTooltip(name);
     }
   }
+}
+
+/** Everything worth showing on the printed map: course, stops, routes and start. */
+export function printBounds(
+  course: LatLon[],
+  stops: Stop[],
+  legs: Step[][],
+  start: LatLon | null,
+): L.LatLngBounds | null {
+  const pts: LatLon[] = [...course, ...stops.map((s) => s.node.pos)];
+  if (start) pts.push(start);
+  for (const st of legs.flat()) pts.push(st.fromPos, st.toPos, ...(st.path ?? []));
+  if (pts.length === 0) return null;
+  return L.latLngBounds(pts.map((p) => L.latLng(p.lat, p.lon)));
+}
+
+/**
+ * Resolves once no tile layer is loading, or after ms. Polls rather than
+ * waiting for 'load', because Leaflet requests the tiles for a new view a
+ * frame or so after the view changes, and a layer still finishing the old
+ * view's tiles would fire 'load' too early.
+ */
+function tilesLoaded(map: L.Map, ms: number): Promise<void> {
+  const busy = () => {
+    let loading = false;
+    map.eachLayer((l) => {
+      if (l instanceof L.TileLayer && l.isLoading()) loading = true;
+    });
+    return loading;
+  };
+  const deadline = Date.now() + ms;
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!busy() || Date.now() >= deadline) resolve();
+      else setTimeout(check, 100);
+    };
+    setTimeout(check, 100);
+  });
 }
 
 /** A round text badge; avoids Leaflet's default image icons, which need asset paths. */
