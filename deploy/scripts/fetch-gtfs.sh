@@ -98,7 +98,7 @@ for arg in "$@"; do
     rome) fetch rome https://romamobilita.it/sites/default/files/rome_static_gtfs.zip || status=1 ;;
     sf)
       fetch sf/bart https://www.bart.gov/dev/schedules/google_transit.zip || status=1
-      fetch sf/muni https://gtfs.sfmta.com/transitdata/google_transit.zip || status=1
+      fetch sf/muni https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip || status=1
       ;;
     sydney)
       if [ -z "${TFNSW_API_KEY:-}" ]; then
