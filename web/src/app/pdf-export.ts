@@ -267,21 +267,52 @@ function drawAttribution(ctx: CanvasRenderingContext2D, w: number, h: number): v
   ctx.fillText(TILE_ATTRIBUTION, w - 5, h - 8);
 }
 
+// Big Shoulders Black (OFL, in public/fonts), Latin only, served next to the app.
+const DISPLAY_FILE = 'BigShoulders-Black.ttf';
+const DISPLAY_FONT = 'BigShoulders';
+
+/** The display font as base64 for jsPDF, or null if it can't be fetched. */
+async function loadDisplayFont(): Promise<string | null> {
+  try {
+    const res = await fetch(`fonts/${DISPLAY_FILE}`);
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  } catch {
+    return null;
+  }
+}
+
 /** Builds the PDF and hands it to the browser as a download. */
 @Injectable({ providedIn: 'root' })
 export class PlanPdf {
   async save(plan: PdfPlan, filename = 'cheersquad-plan.pdf'): Promise<void> {
-    const [{ jsPDF }, { autoTable }, map] = await Promise.all([
+    const [{ jsPDF }, { autoTable }, map, display] = await Promise.all([
       import('jspdf'),
       import('jspdf-autotable'),
       renderMap(plan.map, MAP_W * PX_PER_PT, MAP_H * PX_PER_PT),
+      loadDisplayFont(),
     ]);
     const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    // Titles in the site's display face; Helvetica Bold if the font didn't load.
+    const title = (size: number) => {
+      if (display) doc.setFont(DISPLAY_FONT, 'normal');
+      else doc.setFont('helvetica', 'bold');
+      doc.setFontSize(display ? size : size * 0.8);
+    };
+    if (display) {
+      doc.addFileToVFS(DISPLAY_FILE, display);
+      doc.addFont(DISPLAY_FILE, DISPLAY_FONT, 'normal');
+    }
     let y = MARGIN;
 
-    doc.setFont('helvetica', 'bold').setFontSize(22).setTextColor(BRAND);
-    doc.text('Cheer Squad', MARGIN, y + 16);
-    y += 30;
+    title(30);
+    doc.setTextColor(BRAND).text('Cheer Squad', MARGIN, y + 22);
+    y += 34;
     doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(FG);
     doc.text(pdfText(plan.summary), MARGIN, y + 8);
     y += 18;
@@ -290,10 +321,10 @@ export class PlanPdf {
     doc.link(MARGIN + MAP_W - 130, y + MAP_H - 12, 130, 12, {
       url: 'https://www.openstreetmap.org/copyright',
     });
-    y += MAP_H + 24;
+    y += MAP_H + 30;
 
-    doc.setFont('helvetica', 'bold').setFontSize(16).setTextColor(FG);
-    doc.text(pdfText(plan.heading), MARGIN, y);
+    title(22);
+    doc.setTextColor(FG).text(pdfText(plan.heading), MARGIN, y);
     y += 8;
     if (plan.routing) {
       doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(MUTED);
