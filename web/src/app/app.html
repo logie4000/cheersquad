@@ -22,20 +22,6 @@
         >{{ races().length > 0 ? 'Or upload a GPX file' : 'GPX file' }}
         <input #gpxInput type="file" accept=".gpx,application/gpx+xml" (change)="onFile($event)"
       /></label>
-      <div class="modes units" role="radiogroup" aria-label="Show distances in">
-        <span>Distances in</span>
-        @for (u of unitOptions; track u.value) {
-          <label class="mode">
-            <input
-              type="radio"
-              name="unit"
-              [checked]="unit() === u.value"
-              (change)="setUnit(u.value)"
-            />
-            {{ u.label }}
-          </label>
-        }
-      </div>
       <label>
         Official distance
         <select formControlName="distance">
@@ -167,9 +153,29 @@
       (mapClick)="onMapClick($event)"
     />
 
+    <div class="results-head">
+      @if (result()?.plan?.stops?.length) {
+        @let n = result()!.plan.sightings;
+        <h2>{{ n }} sighting{{ n === 1 ? '' : 's' }}</h2>
+      }
+      <div class="modes units" role="radiogroup" aria-label="Show distances in">
+        <span>Distances in</span>
+        @for (u of unitOptions; track u.value) {
+          <label class="mode">
+            <input
+              type="radio"
+              name="unit"
+              [checked]="unit() === u.value"
+              (change)="setUnit(u.value)"
+            />
+            {{ u.label }}
+          </label>
+        }
+      </div>
+    </div>
+
     @if (result(); as r) {
       @if (r.plan.stops.length > 0) {
-        <h2>{{ r.plan.sightings }} sighting{{ r.plan.sightings === 1 ? '' : 's' }}</h2>
         @if (r.routing) {
           <p class="note routing">Routing: {{ r.routing }}</p>
         }

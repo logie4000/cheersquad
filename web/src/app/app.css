@@ -69,13 +69,27 @@ label input[type='file'] {
 small {
   color: var(--muted);
 }
-/* Unit choice sits on one row: "Distances in (o) Miles ( ) Kilometers". */
+/* Sightings heading on the left, unit choice right-aligned on the same row. */
+.results-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  margin: 1rem 0 0.5rem;
+}
+.results-head h2 {
+  margin: 0;
+}
 .units {
   display: flex;
   flex-wrap: wrap;
   gap: 0 1rem;
-  align-items: baseline;
+  align-items: center;
+  margin-left: auto;
   font-size: 0.9rem;
+}
+.units .mode {
+  margin-top: 0;
 }
 .modes .mode {
   display: flex;
