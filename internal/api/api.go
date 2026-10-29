@@ -174,6 +174,10 @@ type Config struct {
 	// Nil means the straight-line stub. If it is a travel.Prefetcher it is
 	// warmed with every point a plan may ask about before solving.
 	Walk travel.Provider
+	// Bike and Drive time bike and drive mode legs over streets (OSRM's
+	// bicycle and car profiles). Nil means the straight-line stub. Like
+	// Walk, a Prefetcher is warmed before solving.
+	Bike, Drive travel.Provider
 	// Races are the preloaded courses; nil means the embedded ones.
 	Races *races.Catalog
 }
@@ -437,26 +441,40 @@ func thin(pts []geo.LatLon, max int) []geo.LatLon {
 
 // routing is the travel setup chosen for one request.
 type routing struct {
-	// walk is the base provider before closures: the configured walker for
-	// walk and transit modes, the straight-line stub otherwise.
+	// walk is the base provider before closures: the configured router for
+	// the mode (the walker for walk and transit), or the straight-line stub.
 	walk  travel.Provider
 	net   travel.Network // nil unless transit runs on a subway
 	label string
 }
 
+// router returns p, or the straight-line stub if p is nil, and its name.
+func router(p travel.Provider) (travel.Provider, string) {
+	if p == nil {
+		return travel.Haversine{}, "straight-line estimate"
+	}
+	if s, ok := p.(fmt.Stringer); ok {
+		return p, s.String()
+	}
+	return p, "routed"
+}
+
 func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, course []geo.LatLon) routing {
 	stub := travel.Haversine{}
-	walk, walkName := cfg.Walk, "straight-line estimate"
-	if walk == nil {
-		walk = stub
-	} else if s, ok := walk.(fmt.Stringer); ok {
-		walkName = s.String()
-	} else {
-		walkName = "routed"
-	}
+	walk, walkName := router(cfg.Walk)
 	switch mode {
 	case travel.Walk:
 		return routing{walk: walk, label: "Walking: " + walkName}
+	case travel.Bike:
+		if cfg.Bike != nil {
+			bike, name := router(cfg.Bike)
+			return routing{walk: bike, label: "Biking: " + name}
+		}
+	case travel.Drive:
+		if cfg.Drive != nil {
+			drive, name := router(cfg.Drive)
+			return routing{walk: drive, label: "Driving: " + name}
+		}
 	case travel.Transit:
 		nets, schedule := cfg.DayNetworks[day], day
 		if len(nets) == 0 {

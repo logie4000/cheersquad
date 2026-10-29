@@ -15,9 +15,40 @@ services:
       # Subway routing feeds (deploy/scripts/fetch-gtfs.sh). An empty
       # directory is fine: transit falls back to the straight-line estimate.
       GTFS_DIR: /data/gtfs
-      # Optional self-hosted OSRM with the foot profile for walking legs;
-      # without it walks are straight-line estimates.
-      # OSRM_WALK_URL: http://osrm-foot:5000
+      # Street routing for walk, bike and drive legs from the osrm-*
+      # services below. deploy/scripts/deploy.sh sets these for whichever
+      # profiles deploy/scripts/build-osrm.sh has built; without them legs
+      # are straight-line estimates.
+      OSRM_WALK_URL: ${OSRM_WALK_URL:-}
+      OSRM_BIKE_URL: ${OSRM_BIKE_URL:-}
+      OSRM_DRIVE_URL: ${OSRM_DRIVE_URL:-}
     volumes:
       # ./gtfs is /srv/cheersquad/gtfs on the host.
       - ./gtfs:/data/gtfs:ro
+
+  # OSRM routers, one per profile, on the data in ./osrm/<profile>. Each runs
+  # only when its compose profile is on (COMPOSE_PROFILES, which deploy.sh
+  # sets from the profiles built). --mmap serves the files from the page
+  # cache instead of copying them into the process. Only the app reaches
+  # them; no ports are published.
+  osrm-foot: &osrm
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:v5.27.1}
+    container_name: cheersquad-osrm-foot
+    profiles: [osrm-foot]
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld --mmap /data/area.osrm
+    mem_limit: ${OSRM_MEM_LIMIT:-1g}
+    volumes:
+      - ./osrm/foot:/data:ro
+  osrm-bicycle:
+    <<: *osrm
+    container_name: cheersquad-osrm-bicycle
+    profiles: [osrm-bicycle]
+    volumes:
+      - ./osrm/bicycle:/data:ro
+  osrm-car:
+    <<: *osrm
+    container_name: cheersquad-osrm-car
+    profiles: [osrm-car]
+    volumes:
+      - ./osrm/car:/data:ro
