@@ -154,8 +154,10 @@ rm -rf osrm/src                              # optional: drop the downloads
 `build-osrm.sh boston` adds or refreshes one city (the others stay);
 `NAME=URL@WEST,SOUTH,EAST,NORTH` adds any other Geofabrik extract clipped to
 that box. `OSRM_PROFILES="foot car"` builds only some modes. Each profile is
-swapped in only when its build succeeds; run `deploy/scripts/deploy.sh`
-afterwards to restart the routers on the new data.
+swapped in only when its build succeeds, and the script restarts any router
+already running so it serves the new data (a running router keeps serving
+the old files until it restarts). The first time, run
+`deploy/scripts/deploy.sh` to start the routers.
 
 `deploy.sh` turns on the `osrm-foot`, `osrm-bicycle` and `osrm-car` services
 in `docker-compose.yml` for whichever profiles are built (via
@@ -166,10 +168,46 @@ straight-line estimates and the server logs it once.
 Footprint (rough, for the six preloaded cities): the build needs a few GB of
 free memory for a few minutes per profile (car is the smallest, foot the
 largest), and the finished data is about 1-2 GB on disk. The routers serve
-the files memory-mapped (`--mmap`), each capped at `OSRM_MEM_LIMIT` (1 GB by
-default). If the build is too big for the host, run the script on any
-machine with docker (`OSRM_DIR=./osrm deploy/scripts/build-osrm.sh`) and
-copy the `foot`, `bicycle` and `car` folders to `/srv/cheersquad/osrm/`.
+the files memory-mapped (`--mmap`). Each is capped at `OSRM_MEM_LIMIT` (2 GB
+by default), one CPU (`OSRM_CPUS`) and two request threads (`OSRM_THREADS`),
+so a busy router can't starve the other sites. The mapped files count toward
+the memory cap, so keep it above the biggest folder in `du -sh osrm/*`; a
+router squeezed below its data size keeps re-reading its files and burns
+CPU. Set a limit for one run and later runs keep it:
+`OSRM_MEM_LIMIT=3g deploy/scripts/deploy.sh`.
+
+### Building somewhere else
+
+The build uses every core for several minutes per profile, which slows the
+other sites on the host while it runs. To keep it off denali, build on any
+x86_64 Linux machine with docker (or WSL with Docker Desktop on Windows)
+and copy the result over. The data must come from the same OSRM version the
+routers run (both default to the image pinned in the script and compose).
+
+```sh
+# On the build machine:
+git clone https://github.com/logie4000/cheersquad.git ~/cheersquad && cd ~/cheersquad
+OSRM_DIR=~/osrm deploy/scripts/build-osrm.sh
+rsync -a --delete ~/osrm/foot ~/osrm/bicycle ~/osrm/car denali:/srv/cheersquad/osrm.new/
+
+# On denali: swap the new data in, then start or restart the routers.
+cd /srv/cheersquad
+for p in foot bicycle car; do
+  rm -rf osrm/$p.old; [ -d osrm/$p ] && mv osrm/$p osrm/$p.old; mv osrm.new/$p osrm/$p
+done
+rm -rf osrm.new osrm/*.old
+deploy/scripts/deploy.sh
+docker restart cheersquad-osrm-foot cheersquad-osrm-bicycle cheersquad-osrm-car
+```
+
+If the host gets busy, find out what is busy:
+
+```sh
+docker stats --no-stream                       # which container: cheersquad or cheersquad-osrm-*
+vmstat 1 5                                     # high wa/si/so means memory pressure, not CPU work
+docker logs --since 30m cheersquad 2>&1 | grep 'plan:'   # one line per plan: size, time, OSRM requests
+docker logs --since 30m cheersquad-osrm-foot 2>&1 | tail # every request OSRM served, with its time
+```
 
 How times are adjusted: walking uses OSRM's times as they are. Biking adds
 20% for crowds and 2 minutes per stop to lock up the bike. Driving adds 50%

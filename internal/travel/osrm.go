@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/logie4000/cheersquad/internal/geo"
@@ -53,6 +54,9 @@ type OSRM struct {
 	// when full it is cleared rather than growing without bound. Zero means
 	// 2M pairs (roughly 200 MB).
 	MaxMemo int
+
+	// tables and routes count requests sent, for Requests.
+	tables, routes atomic.Int64
 
 	mu        sync.Mutex
 	memo      map[[2]geo.LatLon]cacheVal
@@ -176,6 +180,11 @@ func coords(ps []geo.LatLon) string {
 // get fetches an OSRM service URL and decodes the body into out. OSRM
 // answers NoRoute with a 400 and a JSON body, so the code field decides.
 func (o *OSRM) get(service, path string, q url.Values, out any) error {
+	if service == "table" {
+		o.tables.Add(1)
+	} else {
+		o.routes.Add(1)
+	}
 	u := strings.TrimRight(o.BaseURL, "/") + "/" + service + "/v1/" + o.profile() + "/" + path + "?" + q.Encode()
 	resp, err := o.client().Get(u)
 	if err != nil {
@@ -360,4 +369,10 @@ func (o *OSRM) MaxSpeed(m Mode) float64 {
 		f = 1
 	}
 	return max(b/f, o.Fallback.MaxSpeed(m))
+}
+
+// Requests returns how many /table and /route requests have been sent so
+// far, so callers can log what a plan cost.
+func (o *OSRM) Requests() (tables, routes int64) {
+	return o.tables.Load(), o.routes.Load()
 }

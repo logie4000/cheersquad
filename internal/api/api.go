@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -319,6 +320,13 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	}
 
 	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
+	began := time.Now()
+	counter, _ := rt.walk.(requestCounter)
+	var tables0, routes0 int64
+	if counter != nil {
+		tables0, routes0 = counter.Requests()
+	}
+	prefetched := 0
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
 		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
@@ -338,6 +346,7 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		pts = append(pts, p.Crossings...)
 		if len(pts) <= MaxPrefetchPoints {
 			pf.Prefetch(pts)
+			prefetched = len(pts)
 		}
 	}
 	provider = &travel.Cached{Inner: provider}
@@ -360,6 +369,19 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 			StopPenalty: p.StopPenalty,
 		},
 	)
+	defer func() {
+		// One line per plan, so a CPU spike can be traced to plan sizes and
+		// routing requests. The counts are server-wide over the plan's run.
+		msg := fmt.Sprintf("plan: mode %s, %d candidates, %d crossings, %d stops, %s", mode, len(nodes), len(p.Crossings), len(plan.Stops), time.Since(began).Round(time.Millisecond))
+		if counter != nil {
+			tables, routes := counter.Requests()
+			msg += fmt.Sprintf(", %d points prefetched, osrm %d table + %d route requests", prefetched, tables-tables0, routes-routes0)
+		}
+		if ctx.Err() != nil {
+			msg += ", timed out"
+		}
+		log.Print(msg)
+	}()
 	if ctx.Err() != nil {
 		return nil, errors.New("planning took too long; try wider spacing or fewer crossings")
 	}
@@ -437,6 +459,12 @@ func thin(pts []geo.LatLon, max int) []geo.LatLon {
 		out = append(out, pts[i])
 	}
 	return append(out, pts[len(pts)-1])
+}
+
+// requestCounter is a routing client that counts its requests
+// (travel.OSRM).
+type requestCounter interface {
+	Requests() (tables, routes int64)
 }
 
 // routing is the travel setup chosen for one request.
