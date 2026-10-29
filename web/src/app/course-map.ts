@@ -27,8 +27,10 @@ import {
 // Subway steps use the feed's line color, so the course is a bright blue on a
 // white casing over grayscale tiles to stay distinct from transit colors.
 export const DEFAULT_COURSE_COLOR = '#0a5cff';
-const LEG = '#1d1d1f';
-const WALK = '#000000';
+export const LEG = '#1d1d1f';
+export const WALK = '#000000';
+export const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+export const TILE_ATTRIBUTION = '© OpenStreetMap contributors';
 /** How long to wait for map tiles before printing anyway. */
 const PRINT_TILE_WAIT_MS = 4000;
 
@@ -96,7 +98,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.map = L.map(this.el().nativeElement, { center: [39.5, -98.35], zoom: 4 });
     const osm = (className: string) =>
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      L.tileLayer(TILE_URL, {
         maxZoom: 19,
         className,
         attribution:

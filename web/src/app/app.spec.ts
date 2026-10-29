@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 import { CourseMap } from './course-map';
+import { PlanPdf } from './pdf-export';
 import { PlanResponse } from './plan';
 import { PlanService } from './plan.service';
 
@@ -234,17 +235,20 @@ describe('App', () => {
       expect(TestBed.createComponent(App).componentInstance.unit()).toBe('km');
     });
   });
-  describe('PDF export', () => {
+  describe('print and PDF export', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it('shows Export PDF only once there is a plan', () => {
+    it('shows Print and Export PDF only once there is a plan', () => {
       const fixture = TestBed.createComponent(App);
       fixture.detectChanges();
       const el = fixture.nativeElement as HTMLElement;
       expect(el.querySelector('button.export')).toBeNull();
       fixture.componentInstance.result.set(base);
       fixture.detectChanges();
-      expect(el.querySelector('button.export')?.textContent?.trim()).toBe('Export PDF');
+      const labels = Array.from(el.querySelectorAll('button.export')).map((b) =>
+        b.textContent?.trim(),
+      );
+      expect(labels).toEqual(['Print', 'Export PDF']);
     });
 
     it('frames the map for print, titles the page and opens the print dialog', async () => {
@@ -258,11 +262,11 @@ describe('App', () => {
       app.result.set(base);
       fixture.detectChanges();
 
-      await app.exportPdf();
+      await app.printPlan();
       fixture.detectChanges();
       expect(fit).toHaveBeenCalled();
       expect(print).toHaveBeenCalled();
-      expect(app.preparingPdf()).toBe(false);
+      expect(app.preparingPrint()).toBe(false);
       const title = (fixture.nativeElement as HTMLElement).querySelector('.print-title p');
       expect(title?.textContent).toBe(
         'Spring 10K · goal 3:45:00 · gun 10:00 · by transit from 06:45',
@@ -273,6 +277,33 @@ describe('App', () => {
       window.dispatchEvent(new Event('pointerdown'));
       window.dispatchEvent(new Event('keydown'));
       expect(restore).toHaveBeenCalledTimes(1);
+    });
+
+    it('exports the plan as text in the chosen units, with map data', async () => {
+      const save = vi.spyOn(PlanPdf.prototype, 'save').mockResolvedValue();
+      const app = TestBed.createComponent(App).componentInstance;
+      app.result.set(base);
+      app.setUnit('km');
+      await app.exportPdf();
+      const plan = save.mock.calls[0][0];
+      expect(plan.heading).toBe('1 sighting');
+      expect(plan.columns[1]).toBe('Km');
+      expect(plan.rows[0].cells.slice(0, 3)).toEqual(['1', '16.1', '7:50 AM']);
+      expect(plan.rows[0].link).toContain('40.74,-74');
+      expect(plan.map.stops).toEqual([stop]);
+      expect(app.exportingPdf()).toBe(false);
+      try {
+        localStorage.removeItem('cheersquad.unit');
+      } catch {}
+    });
+
+    it('suggests Print when the PDF fails', async () => {
+      vi.spyOn(PlanPdf.prototype, 'save').mockRejectedValue(new Error('no canvas'));
+      const app = TestBed.createComponent(App).componentInstance;
+      app.result.set(base);
+      await app.exportPdf();
+      expect(app.error()).toContain('Print');
+      expect(app.exportingPdf()).toBe(false);
     });
   });
 });

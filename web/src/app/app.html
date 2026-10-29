@@ -177,15 +177,26 @@
         }
       </div>
       @if (result()?.plan?.stops?.length) {
-        <button
-          type="button"
-          class="export"
-          [disabled]="preparingPdf()"
-          (click)="exportPdf()"
-          title="Opens the print dialog; choose Save as PDF"
-        >
-          {{ preparingPdf() ? 'Preparing…' : 'Export PDF' }}
-        </button>
+        <div class="exports">
+          <button
+            type="button"
+            class="export"
+            [disabled]="preparingPrint()"
+            (click)="printPlan()"
+            title="Print the map and sightings, or save them as PDF from the print dialog"
+          >
+            {{ preparingPrint() ? 'Preparing…' : 'Print' }}
+          </button>
+          <button
+            type="button"
+            class="export"
+            [disabled]="exportingPdf()"
+            (click)="exportPdf()"
+            title="Download the map and sightings as a PDF file"
+          >
+            {{ exportingPdf() ? 'Making PDF…' : 'Export PDF' }}
+          </button>
+        </div>
       }
     </div>
 

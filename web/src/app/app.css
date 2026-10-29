@@ -195,6 +195,10 @@ tr.leg td {
   line-height: 1.35rem;
   text-align: center;
 }
+.exports {
+  display: flex;
+  gap: 0.5rem;
+}
 button.export {
   padding: 0.3rem 0.75rem;
   font: inherit;
@@ -218,6 +222,10 @@ button.export {
   header,
   form.panel,
   .units,
+  .exports {
+    display: flex;
+    gap: 0.5rem;
+  }
   button.export {
     display: none;
   }

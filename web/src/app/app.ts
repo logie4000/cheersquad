@@ -22,6 +22,7 @@ import {
   stepText,
   textOn,
 } from './plan';
+import { PdfPlan, PlanPdf } from './pdf-export';
 import { PlanService } from './plan.service';
 
 type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
@@ -78,6 +79,7 @@ export class App implements OnInit {
   private readonly api = inject(PlanService);
   private readonly fb = inject(NonNullableFormBuilder);
   private readonly map = viewChild(CourseMap);
+  private readonly pdf = inject(PlanPdf);
 
   readonly form = this.fb.group({
     goalFinish: '4:00:00',
@@ -114,7 +116,9 @@ export class App implements OnInit {
   readonly error = signal<string | null>(null);
   readonly loading = signal(false);
   /** True while the map loads tiles at print size, before the print dialog opens. */
-  readonly preparingPdf = signal(false);
+  readonly preparingPrint = signal(false);
+  /** True while the PDF download is being drawn. */
+  readonly exportingPdf = signal(false);
   /** Which course, the runner's goal, and how you travel, for the printed plan's header. */
   readonly printTitle = signal('');
   readonly courseColor = signal(savedCourseColor());
@@ -247,21 +251,79 @@ export class App implements OnInit {
   }
 
   /**
-   * Exports the plan as a PDF through the browser's print dialog ("Save as
-   * PDF"). The print stylesheet keeps just the map and the sightings table.
+   * Prints the plan through the browser's print dialog (which can also save
+   * a PDF). The print stylesheet keeps just the map and the sightings table.
    */
-  async exportPdf(): Promise<void> {
-    if (this.preparingPdf()) return;
+  async printPlan(): Promise<void> {
+    if (this.preparingPrint()) return;
     this.printTitle.set(this.planSummary());
-    this.preparingPdf.set(true);
+    this.preparingPrint.set(true);
     const map = this.map();
     try {
       await map?.fitForPrint();
     } finally {
-      this.preparingPdf.set(false);
+      this.preparingPrint.set(false);
     }
     window.addEventListener('afterprint', () => restoreOnNextInput(map), { once: true });
     window.print();
+  }
+
+  /** Downloads the plan as a PDF file, drawn in the page without the print dialog. */
+  async exportPdf(): Promise<void> {
+    const plan = this.pdfPlan();
+    if (!plan || this.exportingPdf()) return;
+    this.exportingPdf.set(true);
+    this.error.set(null);
+    try {
+      await this.pdf.save(plan);
+    } catch {
+      this.error.set("Couldn't make the PDF. Try Print and save as PDF instead.");
+    } finally {
+      this.exportingPdf.set(false);
+    }
+  }
+
+  /** The current plan as the PDF's text and map, in the chosen units. */
+  pdfPlan(): PdfPlan | null {
+    const r = this.result();
+    if (!r?.plan.stops.length) return null;
+    const n = r.plan.sightings;
+    const legs = this.legs();
+    return {
+      summary: this.planSummary(),
+      heading: `${n} sighting${n === 1 ? '' : 's'}`,
+      routing: r.routing ? `Routing: ${r.routing}` : undefined,
+      columns: [
+        '#',
+        this.unit() === 'km' ? 'Km' : 'Mile',
+        'Leave',
+        'Arrive',
+        'Runner passes',
+        'Wait',
+      ],
+      rows: r.plan.stops.map((s, i) => ({
+        cells: [
+          String(i + 1),
+          this.distance(s.node.dist),
+          this.clock(s.depart),
+          `${this.clock(s.arrive)} (${this.minutes(s.travel)} ${r.mode})`,
+          `${this.clock(s.node.tExpected)} (${this.clock(s.node.tFast)}–${this.clock(s.node.tSlow)})`,
+          this.minutes(s.wait),
+        ],
+        link: this.mapsLink(s.node.pos),
+        steps: legs[i].length ? legs[i].map((st) => stepText(st)).join('  ›  ') : undefined,
+      })),
+      note:
+        "Leave times assume the runner is at the slow end of their window, so you can go sooner once you've seen them." +
+        (r.routing ? '' : ' Travel times are straight-line estimates for now, not real routes.'),
+      map: {
+        course: this.course(),
+        stops: r.plan.stops,
+        legs,
+        start: this.marks().start,
+        courseColor: this.courseColor(),
+      },
+    };
   }
 
   /** e.g. "Boston Marathon · goal 3:45:00 · gun 10:00 · by transit from 09:30". */
