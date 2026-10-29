@@ -15,9 +15,12 @@
 # file there to drop a city. All areas are merged and built once per OSRM
 # profile (foot, bicycle, car) into OSRM_DIR/<profile>, which the osrm-*
 # services in docker-compose.yml serve. A profile is swapped into place only
-# when its build succeeds. Afterwards run deploy/scripts/deploy.sh, which
-# starts the routers for whichever profiles are built and points the app at
-# them.
+# when its build succeeds, and a router already running is restarted on it.
+# The first time, run deploy/scripts/deploy.sh afterwards: it starts the
+# routers for whichever profiles are built and points the app at them.
+#
+# The build uses every core for minutes per profile; to keep that off a
+# busy host, build elsewhere and copy the folders (deploy/README.md).
 #
 # Needs docker. Downloads are cached in OSRM_DIR/src (the US state and Kanto
 # extracts are a few hundred MB each); delete it when done to free the space.
@@ -35,7 +38,7 @@ geofabrik=https://download.geofabrik.de
 all=(berlin boston chicago london nyc tokyo)
 
 usage() {
-  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -130,4 +133,13 @@ for p in $profiles; do
 done
 rm -f "$dir/area.osm.pbf"
 
-echo "done; run deploy/scripts/deploy.sh to start (or restart) the routers"
+# A running router keeps serving the files it opened, so restart it on the
+# new data (when building on another machine there is none to restart).
+for p in $profiles; do
+  c=cheersquad-osrm-$p
+  if [ "$(docker inspect --format '{{.State.Running}}' "$c" 2>/dev/null)" = true ]; then
+    echo "restarting $c"
+    docker restart "$c" >/dev/null
+  fi
+done
+echo "done; the first time, run deploy/scripts/deploy.sh to start the routers"

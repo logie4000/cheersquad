@@ -154,8 +154,10 @@ rm -rf osrm/src                              # optional: drop the downloads
 `build-osrm.sh boston` adds or refreshes one city (the others stay);
 `NAME=URL@WEST,SOUTH,EAST,NORTH` adds any other Geofabrik extract clipped to
 that box. `OSRM_PROFILES="foot car"` builds only some modes. Each profile is
-swapped in only when its build succeeds; run `deploy/scripts/deploy.sh`
-afterwards to restart the routers on the new data.
+swapped in only when its build succeeds, and the script restarts any router
+already running so it serves the new data (a running router keeps serving
+the old files until it restarts). The first time, run
+`deploy/scripts/deploy.sh` to start the routers.
 
 `deploy.sh` turns on the `osrm-foot`, `osrm-bicycle` and `osrm-car` services
 in `docker-compose.yml` for whichever profiles are built (via
@@ -172,9 +174,31 @@ so a busy router can't starve the other sites. The mapped files count toward
 the memory cap, so keep it above the biggest folder in `du -sh osrm/*`; a
 router squeezed below its data size keeps re-reading its files and burns
 CPU. Set a limit for one run and later runs keep it:
-`OSRM_MEM_LIMIT=3g deploy/scripts/deploy.sh`. If the build is too big for the host, run the script on any
-machine with docker (`OSRM_DIR=./osrm deploy/scripts/build-osrm.sh`) and
-copy the `foot`, `bicycle` and `car` folders to `/srv/cheersquad/osrm/`.
+`OSRM_MEM_LIMIT=3g deploy/scripts/deploy.sh`.
+
+### Building somewhere else
+
+The build uses every core for several minutes per profile, which slows the
+other sites on the host while it runs. To keep it off denali, build on any
+x86_64 Linux machine with docker (or WSL with Docker Desktop on Windows)
+and copy the result over. The data must come from the same OSRM version the
+routers run (both default to the image pinned in the script and compose).
+
+```sh
+# On the build machine:
+git clone https://github.com/logie4000/cheersquad.git ~/cheersquad && cd ~/cheersquad
+OSRM_DIR=~/osrm deploy/scripts/build-osrm.sh
+rsync -a --delete ~/osrm/foot ~/osrm/bicycle ~/osrm/car denali:/srv/cheersquad/osrm.new/
+
+# On denali: swap the new data in, then start or restart the routers.
+cd /srv/cheersquad
+for p in foot bicycle car; do
+  rm -rf osrm/$p.old; [ -d osrm/$p ] && mv osrm/$p osrm/$p.old; mv osrm.new/$p osrm/$p
+done
+rm -rf osrm.new osrm/*.old
+deploy/scripts/deploy.sh
+docker restart cheersquad-osrm-foot cheersquad-osrm-bicycle cheersquad-osrm-car
+```
 
 If the host gets busy, find out what is busy:
 
