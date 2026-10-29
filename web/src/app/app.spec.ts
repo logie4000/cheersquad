@@ -203,4 +203,34 @@ describe('App', () => {
     expect(el.querySelector('.steps')).toBeNull();
     expect(el.querySelector('.routing')).toBeNull();
   });
+
+  describe('distance units', () => {
+    beforeEach(() => {
+      try {
+        localStorage.removeItem('cheersquad.unit');
+      } catch {}
+    });
+
+    it('switches shown distances and typed-in values to kilometers and remembers it', () => {
+      const fixture = TestBed.createComponent(App);
+      const app = fixture.componentInstance;
+      app.form.controls.lateFrom.setValue(20);
+      app.result.set(base);
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('thead')?.textContent).toContain('Mile');
+      expect(el.querySelector('tbody a')?.textContent?.trim()).toBe('10.0');
+      expect(el.textContent).toContain('after mile');
+
+      app.setUnit('km');
+      fixture.detectChanges();
+      expect(el.querySelector('thead')?.textContent).toContain('Km');
+      expect(el.querySelector('tbody a')?.textContent?.trim()).toBe('16.1');
+      expect(el.textContent).toContain('after km');
+      expect(el.textContent).toContain('Marathon (42.2 km)');
+      expect(app.form.controls.lateFrom.value).toBe(32.2);
+      expect(localStorage.getItem('cheersquad.unit')).toBe('km');
+      expect(TestBed.createComponent(App).componentInstance.unit()).toBe('km');
+    });
+  });
 });

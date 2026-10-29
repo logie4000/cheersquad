@@ -69,6 +69,14 @@ label input[type='file'] {
 small {
   color: var(--muted);
 }
+/* Unit choice sits on one row: "Distances in (o) Miles ( ) Kilometers". */
+.units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
 .modes .mode {
   display: flex;
   gap: 0.4rem;

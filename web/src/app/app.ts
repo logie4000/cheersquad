@@ -3,13 +3,15 @@ import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { CourseMap, DEFAULT_COURSE_COLOR } from './course-map';
 import {
   buildParams,
+  convertDistance,
+  DistanceUnit,
+  formatDistance,
   formatClock,
   formatMinutes,
   LatLon,
   legSteps,
   lineColor,
   MapMarks,
-  METERS_PER_MILE,
   parseClock,
   parseGpxPoints,
   PlanForm,
@@ -25,6 +27,7 @@ import { PlanService } from './plan.service';
 type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
 
 const COURSE_COLOR_KEY = 'cheersquad.courseColor';
+const UNIT_KEY = 'cheersquad.unit';
 
 /** The remembered course color; storage can be blocked, so fall back quietly. */
 function savedCourseColor(): string {
@@ -33,6 +36,14 @@ function savedCourseColor(): string {
     if (c && /^#[0-9a-f]{6}$/i.test(c)) return c;
   } catch {}
   return DEFAULT_COURSE_COLOR;
+}
+
+/** The remembered distance unit, miles unless kilometers was chosen. */
+function savedUnit(): DistanceUnit {
+  try {
+    if (localStorage.getItem(UNIT_KEY) === 'km') return 'km';
+  } catch {}
+  return 'mi';
 }
 
 @Component({
@@ -51,15 +62,16 @@ export class App implements OnInit {
     startDelayMinutes: 0,
     uncertaintyPercent: 5,
     distance: 'marathon' as PlanForm['distance'],
-    customMiles: this.fb.control<number | null>(null),
+    unit: savedUnit(),
+    customDistance: this.fb.control<number | null>(null),
     gunTime: '07:00',
     spectatorStart: '06:45',
     mode: 'walk' as PlanForm['mode'],
     raceDay: 'sunday' as PlanForm['raceDay'],
     bufferMinutes: 3,
     maxStops: 0,
-    lateMilesFrom: this.fb.control<number | null>(null),
-    lateMilesWeight: 2,
+    lateFrom: this.fb.control<number | null>(null),
+    lateWeight: 2,
   });
 
   readonly clickModes: { value: ClickMode; label: string }[] = [
@@ -79,6 +91,11 @@ export class App implements OnInit {
   readonly error = signal<string | null>(null);
   readonly loading = signal(false);
   readonly courseColor = signal(savedCourseColor());
+  readonly unit = signal<DistanceUnit>(this.form.controls.unit.value);
+  readonly unitOptions: { value: DistanceUnit; label: string }[] = [
+    { value: 'mi', label: 'Miles' },
+    { value: 'km', label: 'Kilometers' },
+  ];
   readonly stops = computed(() => this.result()?.plan.stops ?? []);
   /** Index-aligned with stops; empty legs when the server sends none. */
   readonly legs = computed(() => {
@@ -90,6 +107,20 @@ export class App implements OnInit {
     this.courseColor.set(color);
     try {
       localStorage.setItem(COURSE_COLOR_KEY, color);
+    } catch {}
+  }
+
+  /** Switches the shown unit and converts distances already typed in. */
+  setUnit(u: DistanceUnit): void {
+    const from = this.unit();
+    if (u === from) return;
+    for (const c of [this.form.controls.customDistance, this.form.controls.lateFrom]) {
+      if (c.value) c.setValue(convertDistance(c.value, from, u));
+    }
+    this.form.controls.unit.setValue(u);
+    this.unit.set(u);
+    try {
+      localStorage.setItem(UNIT_KEY, u);
     } catch {}
   }
 
@@ -195,8 +226,8 @@ export class App implements OnInit {
   minutes(s: number): string {
     return formatMinutes(s);
   }
-  mile(meters: number): string {
-    return (meters / METERS_PER_MILE).toFixed(1);
+  distance(meters: number): string {
+    return formatDistance(meters, this.unit());
   }
   stepText(s: Step): string {
     return stepText(s);

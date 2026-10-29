@@ -16,6 +16,8 @@ import {
   stepMinutes,
   stepText,
   textOn,
+  convertDistance,
+  formatDistance,
 } from './plan';
 
 const form: PlanForm = {
@@ -24,15 +26,16 @@ const form: PlanForm = {
   startDelayMinutes: 12,
   uncertaintyPercent: 5,
   distance: 'marathon',
-  customMiles: null,
+  unit: 'mi',
+  customDistance: null,
   gunTime: '07:00',
   spectatorStart: '06:30',
   mode: 'bike',
   raceDay: 'weekday',
   bufferMinutes: 3,
   maxStops: 0,
-  lateMilesFrom: 20,
-  lateMilesWeight: 2,
+  lateFrom: 20,
+  lateWeight: 2,
 };
 const marks = {
   start: { lat: 1, lon: 2 },
@@ -82,6 +85,27 @@ describe('buildParams', () => {
     expect(buildParams({ ...form, goalFinish: '' }, marks)).toContain('finish');
     expect(buildParams(form, { ...marks, start: null })).toContain('start');
     expect(buildParams({ ...form, distance: 'custom' }, marks)).toContain('miles');
+    expect(buildParams({ ...form, distance: 'custom', unit: 'km' }, marks)).toContain('kilometers');
+  });
+
+  it('reads custom distances and bonus thresholds in kilometers', () => {
+    const p = buildParams(
+      { ...form, unit: 'km', distance: 'custom', customDistance: 10, lateFrom: 33 },
+      marks,
+    ) as PlanParams;
+    expect(p.certifiedMeters).toBe(10000);
+    // km 33 starts at 32 km = 19.9 mi, inside the 20th mile.
+    expect(p.mileWeights?.['20']).toBe(2);
+    expect(p.mileWeights?.['19']).toBeUndefined();
+  });
+});
+
+describe('distance units', () => {
+  it('formats and converts between miles and kilometers', () => {
+    expect(formatDistance(42195, 'mi')).toBe('26.2');
+    expect(formatDistance(42195, 'km')).toBe('42.2');
+    expect(convertDistance(20, 'mi', 'km')).toBe(32.2);
+    expect(convertDistance(32.2, 'km', 'mi')).toBe(20);
   });
 });
 

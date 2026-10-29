@@ -22,18 +22,33 @@
         >{{ races().length > 0 ? 'Or upload a GPX file' : 'GPX file' }}
         <input #gpxInput type="file" accept=".gpx,application/gpx+xml" (change)="onFile($event)"
       /></label>
+      <div class="modes units" role="radiogroup" aria-label="Show distances in">
+        <span>Distances in</span>
+        @for (u of unitOptions; track u.value) {
+          <label class="mode">
+            <input
+              type="radio"
+              name="unit"
+              [checked]="unit() === u.value"
+              (change)="setUnit(u.value)"
+            />
+            {{ u.label }}
+          </label>
+        }
+      </div>
       <label>
         Official distance
         <select formControlName="distance">
-          <option value="marathon">Marathon (26.2 mi)</option>
-          <option value="half">Half marathon (13.1 mi)</option>
+          <option value="marathon">Marathon ({{ distance(42195) }} {{ unit() }})</option>
+          <option value="half">Half marathon ({{ distance(21097.5) }} {{ unit() }})</option>
           <option value="custom">Other…</option>
           <option value="gpx">Use the GPX length</option>
         </select>
       </label>
       @if (form.controls.distance.value === 'custom') {
         <label
-          >Miles <input type="number" step="0.1" min="0" formControlName="customMiles"
+          >{{ unit() === 'km' ? 'Kilometers' : 'Miles' }}
+          <input type="number" step="0.1" min="0" formControlName="customDistance"
         /></label>
       }
       <label>Gun time <input type="time" formControlName="gunTime" /></label>
@@ -88,13 +103,18 @@
         >Max stops (0 = no limit) <input type="number" min="0" formControlName="maxStops"
       /></label>
       <label>
-        Add a bonus for cheer spots after mile
-        <input type="number" min="1" formControlName="lateMilesFrom" placeholder="e.g. 20" />
+        Add a bonus for cheer spots after {{ unit() === 'km' ? 'km' : 'mile' }}
+        <input
+          type="number"
+          min="1"
+          formControlName="lateFrom"
+          [placeholder]="unit() === 'km' ? 'e.g. 32' : 'e.g. 20'"
+        />
       </label>
-      @if (form.controls.lateMilesFrom.value) {
+      @if (form.controls.lateFrom.value) {
         <label
-          >…worth <input type="number" min="1" step="0.5" formControlName="lateMilesWeight" /> × a
-          normal sighting</label
+          >…worth <input type="number" min="1" step="0.5" formControlName="lateWeight" /> × a normal
+          sighting</label
         >
       }
     </fieldset>
@@ -143,6 +163,7 @@
       [stops]="stops()"
       [legs]="legs()"
       [courseColor]="courseColor()"
+      [unit]="unit()"
       (mapClick)="onMapClick($event)"
     />
 
@@ -156,7 +177,7 @@
           <thead>
             <tr>
               <th>#</th>
-              <th>Mile</th>
+              <th>{{ unit() === 'km' ? 'Km' : 'Mile' }}</th>
               <th>Leave</th>
               <th>Arrive</th>
               <th>Runner passes</th>
@@ -170,7 +191,7 @@
                 <td>{{ i + 1 }}</td>
                 <td>
                   <a [href]="mapsLink(s.node.pos)" target="_blank" rel="noopener">{{
-                    mile(s.node.dist)
+                    distance(s.node.dist)
                   }}</a>
                 </td>
                 <td>{{ clock(s.depart) }}</td>
