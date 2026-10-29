@@ -29,15 +29,19 @@ services:
   # OSRM routers, one per profile, on the data in ./osrm/<profile>. Each runs
   # only when its compose profile is on (COMPOSE_PROFILES, which deploy.sh
   # sets from the profiles built). --mmap serves the files from the page
-  # cache instead of copying them into the process. Only the app reaches
-  # them; no ports are published.
+  # cache instead of copying them into the process; those cached pages count
+  # toward mem_limit, so it must be above the profile's data size
+  # (du -sh osrm/*) or the router keeps re-reading its files and burns CPU.
+  # cpus and --threads keep a busy router from starving the other sites on
+  # the host. Only the app reaches them; no ports are published.
   osrm-foot: &osrm
     image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:v5.27.1}
     container_name: cheersquad-osrm-foot
     profiles: [osrm-foot]
     restart: unless-stopped
-    command: osrm-routed --algorithm mld --mmap /data/area.osrm
-    mem_limit: ${OSRM_MEM_LIMIT:-1g}
+    command: osrm-routed --algorithm mld --mmap --threads ${OSRM_THREADS:-2} /data/area.osrm
+    mem_limit: ${OSRM_MEM_LIMIT:-2g}
+    cpus: ${OSRM_CPUS:-1.0}
     volumes:
       - ./osrm/foot:/data:ro
   osrm-bicycle:

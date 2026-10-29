@@ -127,6 +127,9 @@ func TestOSRMRoute(t *testing.T) {
 	if routes != 1 {
 		t.Fatalf("%d route requests, want 1 (cached)", routes)
 	}
+	if tb, rt := o.Requests(); tb != 0 || rt != 1 {
+		t.Fatalf("Requests() = %d tables, %d routes", tb, rt)
+	}
 	if _, ok := o.Duration(a, island, Walk); ok {
 		t.Fatal("NoRoute should be unreachable")
 	}
