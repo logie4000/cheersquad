@@ -311,7 +311,7 @@ export class App implements OnInit {
           this.minutes(s.wait),
         ],
         link: this.mapsLink(s.node.pos),
-        steps: legs[i].length ? legs[i].map((st) => stepText(st)).join('  ›  ') : undefined,
+        steps: legs[i],
       })),
       note:
         "Leave times assume the runner is at the slow end of their window, so you can go sooner once you've seen them." +

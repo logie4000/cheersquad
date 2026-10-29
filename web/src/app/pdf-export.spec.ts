@@ -1,4 +1,6 @@
-import { fitView, pdfText, project, tilesFor, toPixel } from './pdf-export';
+import { jsPDF } from 'jspdf';
+import { fitView, layoutSteps, pdfText, project, tilesFor, toPixel } from './pdf-export';
+import { Step } from './plan';
 
 describe('pdf map projection', () => {
   it('projects like Web Mercator at zoom 0', () => {
@@ -59,5 +61,46 @@ describe('pdfText', () => {
     expect(pdfText('8:58 AM–9:11 AM')).toBe('8:58 AM-9:11 AM');
     expect(pdfText('Südkreuz')).toBe('Südkreuz');
     expect(pdfText('Walk  ›  U2 新宿')).toBe('Walk  >  U2 ');
+  });
+});
+
+describe('layoutSteps', () => {
+  const a = { lat: 40.78, lon: -73.98 };
+  const steps: Step[] = [
+    { kind: 'walk', fromPos: a, toPos: a, seconds: 240 },
+    {
+      kind: 'subway',
+      line: '1',
+      color: 'EE352E',
+      from: '72 St',
+      to: '14 St',
+      fromPos: a,
+      toPos: a,
+      seconds: 540,
+    },
+  ];
+
+  it('gives subway steps a badge in the line color', () => {
+    const [line, ...rest] = layoutSteps(new jsPDF({ unit: 'pt' }), steps, 500);
+    expect(rest).toEqual([]);
+    expect(line.parts.map((p) => [p.kind, p.text])).toEqual([
+      ['text', 'Walk 4 min'],
+      ['sep', '>'],
+      ['badge', '1'],
+      ['text', '72 St to 14 St · 9 min'],
+    ]);
+    expect(line.parts[2].bg).toBe('#ee352e');
+    expect(line.parts[2].fg).toBe('#000000'); // as on screen: black has more contrast on this red
+    expect(line.x).toEqual([...line.x].sort((p, q) => p - q));
+  });
+
+  it('wraps a step that does not fit onto its own line, without a leading separator', () => {
+    const lines = layoutSteps(new jsPDF({ unit: 'pt' }), steps, 90);
+    expect(lines.length).toBe(2);
+    expect(lines[1].parts[0].kind).toBe('badge');
+    for (const l of lines) {
+      const last = l.parts.length - 1;
+      expect(l.x[last] + l.parts[last].width).toBeLessThanOrEqual(90.01);
+    }
   });
 });

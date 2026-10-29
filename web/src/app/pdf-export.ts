@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { LEG, TILE_ATTRIBUTION, TILE_URL, WALK } from './course-map';
-import { LatLon, lineColor, Step, Stop } from './plan';
+import { LatLon, lineColor, Step, stepDetail, Stop, textOn } from './plan';
 
 // A downloadable PDF of the plan, drawn without the browser's print dialog:
 // the map is painted onto a canvas from OSM tiles plus our own course, legs
@@ -22,7 +22,7 @@ export interface PdfPlan {
   heading: string;
   routing?: string;
   columns: string[];
-  rows: { cells: string[]; link?: string; steps?: string }[];
+  rows: { cells: string[]; link?: string; steps?: Step[] }[];
   note: string;
   map: MapScene;
 }
@@ -54,6 +54,11 @@ const START = '#e8710a';
 const STOP = '#00bfff';
 const FG = '#1d1d1f';
 const BORDER = '#d9d9de';
+// The steps row under each stop: 8 pt text with subway line badges.
+const STEP_SIZE = 8;
+const STEP_LINE = 12;
+const FIRST_COL = 20;
+const PAD = 4;
 
 /** Zoom-0 pixel position of a point (256 px world). */
 export function project(p: LatLon): { x: number; y: number } {
@@ -297,24 +302,30 @@ export class PlanPdf {
     }
 
     // Each stop is a row, with how to get there in a full-width row under it.
+    // The steps are drawn by hand so subway lines get their colored badges.
+    const stepWidth = MAP_W - FIRST_COL - 2 * PAD;
     const body: { content: string; colSpan?: number; styles?: object }[][] = [];
     const links: (string | undefined)[] = [];
     const ruled: boolean[] = [];
+    const stepRows: (StepLine[] | undefined)[] = [];
     for (const r of plan.rows) {
       body.push(r.cells.map((c) => ({ content: pdfText(c) })));
       links.push(r.link);
-      ruled.push(!r.steps);
-      if (r.steps) {
+      const steps = r.steps?.length ? layoutSteps(doc, r.steps, stepWidth) : undefined;
+      ruled.push(!steps);
+      stepRows.push(undefined);
+      if (steps) {
         body.push([
           { content: '' },
           {
-            content: pdfText(r.steps),
+            content: '',
             colSpan: r.cells.length - 1,
-            styles: { fontSize: 8, textColor: MUTED },
+            styles: { minCellHeight: steps.length * STEP_LINE + 2 },
           },
         ]);
         links.push(undefined);
         ruled.push(true);
+        stepRows.push(steps);
       }
     }
     autoTable(doc, {
@@ -323,7 +334,8 @@ export class PlanPdf {
       head: [plan.columns.map(pdfText)],
       body,
       theme: 'plain',
-      styles: { font: 'helvetica', fontSize: 9, textColor: FG, cellPadding: 4 },
+      styles: { font: 'helvetica', fontSize: 9, textColor: FG, cellPadding: PAD },
+      columnStyles: { 0: { cellWidth: FIRST_COL } },
       headStyles: {
         textColor: MUTED,
         fontStyle: 'normal',
@@ -342,8 +354,11 @@ export class PlanPdf {
         if (d.column.index === 1 && links[d.row.index]) d.cell.styles.textColor = ACCENT;
       },
       didDrawCell: (d) => {
-        const url = d.section === 'body' && d.column.index === 1 && links[d.row.index];
+        if (d.section !== 'body') return;
+        const url = d.column.index === 1 && links[d.row.index];
         if (url) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
+        const steps = d.column.index === 1 && stepRows[d.row.index];
+        if (steps) drawSteps(doc, steps, d.cell.x + PAD, d.cell.y);
       },
     });
     const end = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
@@ -356,4 +371,87 @@ export class PlanPdf {
 
     doc.save(filename);
   }
+}
+
+type Doc = import('jspdf').jsPDF;
+
+/** One piece of a steps line: a line badge, plain text, or a separator. */
+interface StepPart {
+  kind: 'badge' | 'text' | 'sep';
+  text: string;
+  width: number;
+  bg?: string;
+  fg?: string;
+}
+type StepLine = { parts: StepPart[]; x: number[] };
+
+const BADGE_SIZE = 7;
+const BADGE_H = 10;
+const BADGE_PAD = 3;
+const GAP = 3;
+
+function textWidth(doc: Doc, text: string, size: number, bold = false): number {
+  doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(size);
+  return doc.getTextWidth(text);
+}
+
+/** The steps as badge + text runs, wrapped to lines no wider than width. */
+export function layoutSteps(doc: Doc, steps: Step[], width: number): StepLine[] {
+  const lines: StepLine[] = [{ parts: [], x: [] }];
+  let x = 0;
+  const place = (p: StepPart) => {
+    const line = lines[lines.length - 1];
+    line.parts.push(p);
+    line.x.push(x);
+    x += p.width + GAP;
+  };
+  steps.forEach((st, i) => {
+    const chunk: StepPart[] = [];
+    if (i > 0) chunk.push({ kind: 'sep', text: '>', width: textWidth(doc, '>', STEP_SIZE) });
+    if (st.kind === 'subway') {
+      const label = pdfText(st.line || 'Subway');
+      const bg = lineColor(st.color) ?? ACCENT;
+      const w = Math.max(BADGE_H, textWidth(doc, label, BADGE_SIZE, true) + 2 * BADGE_PAD);
+      chunk.push({ kind: 'badge', text: label, width: w, bg, fg: textOn(bg) });
+    }
+    const detail = pdfText(stepDetail(st));
+    chunk.push({ kind: 'text', text: detail, width: textWidth(doc, detail, STEP_SIZE) });
+    const total = chunk.reduce((a, p) => a + p.width + GAP, 0) - GAP;
+    // Start a step on a new line when it won't fit; a separator never leads a line.
+    if (x > 0 && x + total > width) {
+      lines.push({ parts: [], x: [] });
+      x = 0;
+      if (chunk[0].kind === 'sep') chunk.shift();
+    }
+    for (const p of chunk) {
+      // A detail too long for any line is cut to fit what's left.
+      if (p.kind === 'text' && x + p.width > width) {
+        doc.setFont('helvetica', 'normal').setFontSize(STEP_SIZE);
+        const first = doc.splitTextToSize(p.text, Math.max(20, width - x))[0] as string;
+        p.text = first;
+        p.width = doc.getTextWidth(first);
+      }
+      place(p);
+    }
+  });
+  return lines;
+}
+
+/** Draws laid-out steps with their top left at (left, top). */
+function drawSteps(doc: Doc, lines: StepLine[], left: number, top: number): void {
+  lines.forEach((line, row) => {
+    const mid = top + row * STEP_LINE + STEP_LINE / 2;
+    line.parts.forEach((p, i) => {
+      const x = left + line.x[i];
+      if (p.kind === 'badge') {
+        doc.setFillColor(p.bg!);
+        doc.roundedRect(x, mid - BADGE_H / 2, p.width, BADGE_H, BADGE_H / 2, BADGE_H / 2, 'F');
+        doc.setFont('helvetica', 'bold').setFontSize(BADGE_SIZE).setTextColor(p.fg!);
+        doc.text(p.text, x + p.width / 2, mid, { align: 'center', baseline: 'middle' });
+      } else {
+        doc.setFont('helvetica', 'normal').setFontSize(STEP_SIZE).setTextColor(MUTED);
+        doc.text(p.text, x, mid, { baseline: 'middle' });
+      }
+    });
+  });
 }
