@@ -98,6 +98,24 @@ export interface Race {
 
 export const METERS_PER_MILE = 1609.344;
 
+/** The distance unit the UI shows and reads distances in. */
+export type DistanceUnit = 'mi' | 'km';
+
+/** Meters in one of the given unit. */
+export function unitMeters(u: DistanceUnit): number {
+  return u === 'km' ? 1000 : METERS_PER_MILE;
+}
+
+/** Formats meters in the given unit to one decimal, e.g. "13.1". */
+export function formatDistance(meters: number, u: DistanceUnit): string {
+  return (meters / unitMeters(u)).toFixed(1);
+}
+
+/** Converts a value entered in one unit to another, to one decimal. */
+export function convertDistance(v: number, from: DistanceUnit, to: DistanceUnit): number {
+  return Math.round(((v * unitMeters(from)) / unitMeters(to)) * 10) / 10;
+}
+
 /** Parses "h:mm:ss", "h:mm" or "mm" into seconds; NaN if malformed. */
 export function parseDuration(s: string): number {
   const parts = s.trim().split(':');
@@ -228,15 +246,16 @@ export interface PlanForm {
   startDelayMinutes: number;
   uncertaintyPercent: number;
   distance: 'gpx' | 'marathon' | 'half' | 'custom';
-  customMiles: number | null;
+  unit: DistanceUnit; // unit of customDistance and lateFrom
+  customDistance: number | null;
   gunTime: string; // HH:MM
   spectatorStart: string; // HH:MM
   mode: Mode;
   raceDay: RaceDay;
   bufferMinutes: number;
   maxStops: number;
-  lateMilesFrom: number | null; // weight late miles from this mile on
-  lateMilesWeight: number;
+  lateFrom: number | null; // weight spots from this mile or km on
+  lateWeight: number;
 }
 
 export interface MapMarks {
@@ -262,15 +281,21 @@ export function buildParams(f: PlanForm, marks: MapMarks): PlanParams | string {
   let certifiedMeters: number | undefined;
   if (f.distance === 'marathon') certifiedMeters = 42195;
   if (f.distance === 'half') certifiedMeters = 21097.5;
+  const unitM = unitMeters(f.unit);
   if (f.distance === 'custom') {
-    if (!f.customMiles || f.customMiles <= 0) return 'Enter the course distance in miles.';
-    certifiedMeters = f.customMiles * METERS_PER_MILE;
+    if (!f.customDistance || f.customDistance <= 0) {
+      return `Enter the course distance in ${f.unit === 'km' ? 'kilometers' : 'miles'}.`;
+    }
+    certifiedMeters = f.customDistance * unitM;
   }
 
+  // The API weights whole miles (mile n is the nth mile of the course), so a
+  // km threshold starts at the mile that contains the start of that km.
   let mileWeights: Record<string, number> | undefined;
-  if (f.lateMilesFrom && f.lateMilesWeight !== 1) {
+  if (f.lateFrom && f.lateWeight !== 1) {
     mileWeights = {};
-    for (let m = f.lateMilesFrom; m <= 30; m++) mileWeights[String(m)] = f.lateMilesWeight;
+    const first = Math.floor(((f.lateFrom - 1) * unitM) / METERS_PER_MILE + 1e-9) + 1;
+    for (let m = first; m <= 30; m++) mileWeights[String(m)] = f.lateWeight;
   }
 
   return {

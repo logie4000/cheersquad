@@ -9,7 +9,17 @@ import {
   viewChild,
 } from '@angular/core';
 import * as L from 'leaflet';
-import { EXCLUDE_RADIUS, LatLon, lineColor, MapMarks, Step, stepText, Stop } from './plan';
+import {
+  DistanceUnit,
+  EXCLUDE_RADIUS,
+  formatDistance,
+  LatLon,
+  lineColor,
+  MapMarks,
+  Step,
+  stepText,
+  Stop,
+} from './plan';
 
 // Leaflet writes path colors as SVG attributes, which can't read CSS variables,
 // so these are literals from the sweat-equity palette in styles.css:
@@ -37,6 +47,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   readonly stops = input<Stop[]>([]);
   /** legs[i] is how to get to stops[i]; a missing or empty leg is drawn as a straight line. */
   readonly legs = input<Step[][]>([]);
+  readonly unit = input<DistanceUnit>('mi');
   readonly courseColor = input(DEFAULT_COURSE_COLOR);
   readonly mapClick = output<LatLon>();
 
@@ -52,7 +63,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     // Recolor in place so changing the color doesn't refit the map.
     effect(() => this.courseLine?.setStyle({ color: this.courseColor() }));
     effect(() => this.drawMarks(this.marks()));
-    effect(() => this.drawStops(this.stops(), this.legs()));
+    effect(() => this.drawStops(this.stops(), this.legs(), this.unit()));
   }
 
   ngAfterViewInit(): void {
@@ -123,7 +134,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     }
   }
 
-  private drawStops(stops: Stop[], legs: Step[][]): void {
+  private drawStops(stops: Stop[], legs: Step[][], unit: DistanceUnit): void {
     this.stopLayer.clearLayers();
     const start = this.marks().start;
     let prev: L.LatLng | null = start ? L.latLng(start.lat, start.lon) : null;
@@ -136,7 +147,9 @@ export class CourseMap implements AfterViewInit, OnDestroy {
         L.polyline([prev, here], { color: LEG, weight: 3, dashArray: '6 6' }).addTo(this.stopLayer);
       }
       L.marker(here, { icon: badge(String(i + 1), 'stop') })
-        .bindTooltip(`Stop ${i + 1}: mile ${(s.node.dist / 1609.344).toFixed(1)}`)
+        .bindTooltip(
+          `Stop ${i + 1}: ${unit === 'km' ? 'km' : 'mile'} ${formatDistance(s.node.dist, unit)}`,
+        )
         .addTo(this.stopLayer);
       prev = here;
     });
