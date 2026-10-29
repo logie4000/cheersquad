@@ -53,6 +53,21 @@ function savedUnit(): DistanceUnit {
   return 'mi';
 }
 
+/**
+ * Puts the map back once the user next touches the page. Chrome fires
+ * afterprint while its print dialog is still open and re-renders the preview
+ * from the live page when a setting changes, so restoring on afterprint
+ * printed a map whose tiles were still loading.
+ */
+function restoreOnNextInput(map: CourseMap | undefined): void {
+  const events = ['pointerdown', 'keydown', 'wheel'] as const;
+  const restore = () => {
+    for (const e of events) window.removeEventListener(e, restore, true);
+    map?.restoreAfterPrint();
+  };
+  for (const e of events) window.addEventListener(e, restore, { capture: true, passive: true });
+}
+
 @Component({
   selector: 'app-root',
   imports: [ReactiveFormsModule, CourseMap],
@@ -245,7 +260,7 @@ export class App implements OnInit {
     } finally {
       this.preparingPdf.set(false);
     }
-    window.addEventListener('afterprint', () => map?.restoreAfterPrint(), { once: true });
+    window.addEventListener('afterprint', () => restoreOnNextInput(map), { once: true });
     window.print();
   }
 

@@ -267,7 +267,11 @@ describe('App', () => {
       expect(title?.textContent).toBe(
         'Spring 10K · goal 3:45:00 · gun 10:00 · by transit from 06:45',
       );
+      // The map keeps its print layout until the dialog is gone and the user is back.
       window.dispatchEvent(new Event('afterprint'));
+      expect(restore).not.toHaveBeenCalled();
+      window.dispatchEvent(new Event('pointerdown'));
+      window.dispatchEvent(new Event('keydown'));
       expect(restore).toHaveBeenCalledTimes(1);
     });
   });

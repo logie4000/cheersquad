@@ -116,4 +116,8 @@ a {
   .leaflet-tooltip {
     display: none;
   }
+  /* Leaflet fades tiles in from script, so a just-loaded tile can still be faint. */
+  .leaflet-container img.leaflet-tile-loaded {
+    opacity: 1 !important;
+  }
 }

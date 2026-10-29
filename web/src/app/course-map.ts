@@ -277,25 +277,27 @@ export function printBounds(
   return L.latLngBounds(pts.map((p) => L.latLng(p.lat, p.lon)));
 }
 
-/** Resolves when no tile layer on the map is still loading, or after ms. */
+/**
+ * Resolves once no tile layer is loading, or after ms. Polls rather than
+ * waiting for 'load', because Leaflet requests the tiles for a new view a
+ * frame or so after the view changes, and a layer still finishing the old
+ * view's tiles would fire 'load' too early.
+ */
 function tilesLoaded(map: L.Map, ms: number): Promise<void> {
-  const loading: L.TileLayer[] = [];
-  map.eachLayer((l) => {
-    if (l instanceof L.TileLayer && l.isLoading()) loading.push(l);
-  });
-  if (loading.length === 0) return Promise.resolve();
+  const busy = () => {
+    let loading = false;
+    map.eachLayer((l) => {
+      if (l instanceof L.TileLayer && l.isLoading()) loading = true;
+    });
+    return loading;
+  };
+  const deadline = Date.now() + ms;
   return new Promise((resolve) => {
-    let left = loading.length;
-    const done = () => {
-      clearTimeout(timer);
-      for (const l of loading) l.off('load', one);
-      resolve();
+    const check = () => {
+      if (!busy() || Date.now() >= deadline) resolve();
+      else setTimeout(check, 100);
     };
-    const one = () => {
-      if (--left === 0) done();
-    };
-    const timer = setTimeout(done, ms);
-    for (const l of loading) l.once('load', one);
+    setTimeout(check, 100);
   });
 }
 
