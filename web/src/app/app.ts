@@ -322,6 +322,7 @@ export class App implements OnInit {
         legs,
         start: this.marks().start,
         courseColor: this.courseColor(),
+        grayTiles: this.map()?.grayTiles() ?? true,
       },
     };
   }

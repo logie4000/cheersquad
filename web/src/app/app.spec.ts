@@ -1,6 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { App } from './app';
 import { CourseMap } from './course-map';
 import { PlanPdf } from './pdf-export';
@@ -292,9 +293,20 @@ describe('App', () => {
       expect(plan.rows[0].link).toContain('40.74,-74');
       expect(plan.map.stops).toEqual([stop]);
       expect(app.exportingPdf()).toBe(false);
+      expect(plan.map.grayTiles).toBe(true);
       try {
         localStorage.removeItem('cheersquad.unit');
       } catch {}
+    });
+
+    it('uses color tiles in the PDF when the color map is picked', async () => {
+      const save = vi.spyOn(PlanPdf.prototype, 'save').mockResolvedValue();
+      const fixture = TestBed.createComponent(App);
+      fixture.componentInstance.result.set(base);
+      fixture.detectChanges();
+      fixture.debugElement.query(By.directive(CourseMap)).componentInstance.grayTiles.set(false);
+      await fixture.componentInstance.exportPdf();
+      expect(save.mock.calls[0][0].map.grayTiles).toBe(false);
     });
 
     it('suggests Print when the PDF fails', async () => {

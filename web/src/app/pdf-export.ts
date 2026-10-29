@@ -14,6 +14,8 @@ export interface MapScene {
   legs: Step[][];
   start: LatLon | null;
   courseColor: string;
+  /** False when the user switched the map to color tiles. */
+  grayTiles: boolean;
 }
 
 /** The plan as text, already in the user's units and clock times. */
@@ -177,8 +179,8 @@ export async function renderMap(m: MapScene, w: number, h: number): Promise<stri
       ]),
     ),
   );
-  // The same gray base map as on screen, so line colors stand out.
-  ctx.filter = 'grayscale(1) brightness(1.05) contrast(0.9)';
+  // The same base map as on screen: gray unless color was picked.
+  if (m.grayTiles) ctx.filter = 'grayscale(1) brightness(1.05) contrast(0.9)';
   images.forEach((img, i) => {
     // Overlap by a hair so tile seams don't show.
     if (img) ctx.drawImage(img, tiles[i].left, tiles[i].top, size + 0.5, size + 0.5);

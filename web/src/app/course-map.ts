@@ -6,6 +6,7 @@ import {
   input,
   OnDestroy,
   output,
+  signal,
   viewChild,
 } from '@angular/core';
 import * as L from 'leaflet';
@@ -77,6 +78,8 @@ export class CourseMap implements AfterViewInit, OnDestroy {
   readonly unit = input<DistanceUnit>('mi');
   readonly courseColor = input(DEFAULT_COURSE_COLOR);
   readonly mapClick = output<LatLon>();
+  /** Which base map the user picked in the layer control. */
+  readonly grayTiles = signal(true);
 
   private readonly el = viewChild.required<ElementRef<HTMLDivElement>>('map');
   private map?: L.Map;
@@ -106,7 +109,11 @@ export class CourseMap implements AfterViewInit, OnDestroy {
       });
     // The same OSM tiles, desaturated by CSS (styles.css) so line colors stand out.
     const gray = osm('tiles-gray').addTo(this.map);
-    L.control.layers({ 'Gray map': gray, 'Color map': osm('tiles-color') }).addTo(this.map);
+    const color = osm('tiles-color');
+    L.control.layers({ 'Gray map': gray, 'Color map': color }).addTo(this.map);
+    this.map.on('baselayerchange', (e: L.LayersControlEvent) =>
+      this.grayTiles.set(e.layer === gray),
+    );
     this.courseLayer.addTo(this.map);
     this.stopLayer.addTo(this.map);
     this.markLayer.addTo(this.map);
