@@ -30,8 +30,9 @@ services:
   # only when its compose profile is on (COMPOSE_PROFILES, which deploy.sh
   # sets from the profiles built). --mmap serves the files from the page
   # cache instead of copying them into the process; those cached pages count
-  # toward mem_limit, so it must be above the profile's data size
-  # (du -sh osrm/*) or the router keeps re-reading its files and burns CPU.
+  # toward mem_limit, so deploy.sh sizes each router's limit from its data
+  # (du -sh osrm/*) to let all of it stay cached; a router squeezed well
+  # below its data size keeps re-reading its files and burns CPU.
   # cpus and --threads keep a busy router from starving the other sites on
   # the host. Only the app reaches them; no ports are published.
   osrm-foot: &osrm
@@ -40,7 +41,7 @@ services:
     profiles: [osrm-foot]
     restart: unless-stopped
     command: osrm-routed --algorithm mld --mmap --threads ${OSRM_THREADS:-2} /data/area.osrm
-    mem_limit: ${OSRM_MEM_LIMIT:-2g}
+    mem_limit: ${OSRM_FOOT_MEM_LIMIT:-2g}
     cpus: ${OSRM_CPUS:-1.0}
     volumes:
       - ./osrm/foot:/data:ro
@@ -48,11 +49,13 @@ services:
     <<: *osrm
     container_name: cheersquad-osrm-bicycle
     profiles: [osrm-bicycle]
+    mem_limit: ${OSRM_BICYCLE_MEM_LIMIT:-2g}
     volumes:
       - ./osrm/bicycle:/data:ro
   osrm-car:
     <<: *osrm
     container_name: cheersquad-osrm-car
     profiles: [osrm-car]
+    mem_limit: ${OSRM_CAR_MEM_LIMIT:-2g}
     volumes:
       - ./osrm/car:/data:ro
