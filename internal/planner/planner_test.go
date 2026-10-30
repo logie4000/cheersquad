@@ -194,3 +194,57 @@ func equal(a, b []float64) bool {
 	}
 	return true
 }
+
+// pinnedNodes is straightNodes plus a pinned spot at pin meters.
+func pinnedNodes(t *testing.T, pin float64) []candidates.Node {
+	t.Helper()
+	tr, err := gpx.New([]geo.LatLon{{}, {Lat: 10000 / degLat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.Calibrate(10000)
+	p := pace.Profile{Distance: 10000, Finish: 3000}
+	return candidates.Generate(tr, p, candidates.Options{Spacing: 1000, Pinned: []geo.LatLon{tr.PointAt(pin)}})
+}
+
+func TestPinnedSpotIsVisited(t *testing.T) {
+	// Unpinned, the cyclist sees every even kilometer. A pin at 3.5 km is
+	// off that rhythm, so the plan shifts: 2, 3.5, 5, 7, 9 km (each hop at
+	// least 1250 m). Its value counts only real weights, not the pin bonus.
+	pl := Solve(Start{}, pinnedNodes(t, 3500), speed(10), Params{Buffer: 250})
+	found := false
+	for _, s := range pl.Stops {
+		if s.Node.Pinned {
+			found = true
+			if math.Abs(s.Node.Dist-3500) > 10 {
+				t.Fatalf("pinned stop at %f, want 3500", s.Node.Dist)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("pinned spot not in plan: %v", dists(pl))
+	}
+	if pl.Value != float64(pl.Sightings) {
+		t.Fatalf("value %f includes the pin bonus (sightings %d)", pl.Value, pl.Sightings)
+	}
+	if got, want := dists(pl), []float64{2000, 3500, 5000, 7000, 9000}; !equal(got, want) {
+		t.Fatalf("stops %v, want %v", got, want)
+	}
+}
+
+func TestUnreachablePinIsSkipped(t *testing.T) {
+	// Walking at 1 m/s from the start line, a pin at 5.5 km can never be
+	// reached, so the plan is unchanged.
+	pl := Solve(Start{}, pinnedNodes(t, 5500), speed(1), Params{})
+	if got := dists(pl); !equal(got, []float64{0}) {
+		t.Fatalf("stops %v, want [0]", got)
+	}
+}
+
+func TestPinnedBeatsMoreSightings(t *testing.T) {
+	// With one stop allowed, the pin wins over every other spot.
+	pl := Solve(Start{}, pinnedNodes(t, 8500), speed(10), Params{Buffer: 250, MaxStops: 1})
+	if got := dists(pl); !equal(got, []float64{8500}) {
+		t.Fatalf("stops %v, want [8500]", got)
+	}
+}

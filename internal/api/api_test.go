@@ -390,3 +390,35 @@ func TestPlanStopsWhenContextEnds(t *testing.T) {
 		t.Fatalf("got %v, want timeout error", err)
 	}
 }
+
+func TestPlanVisitsPinsAndReportsMissed(t *testing.T) {
+	track, err := gpx.Parse(strings.NewReader(straightGPX))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A cyclist from the start line; one pin on the course at 6.5 km, one
+	// 1 km off it.
+	onCourse := track.PointAt(6500)
+	offCourse := geo.LatLon{Lat: onCourse.Lat, Lon: 0.01}
+	p := Params{
+		Runner:    Runner{FinishSeconds: 3000},
+		Spectator: Spectator{Mode: travel.Bike, StartTimeSeconds: -600},
+		Pinned:    []geo.LatLon{onCourse, offCourse},
+	}
+	resp, err := Plan(context.Background(), track, p, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := 0
+	for _, st := range resp.Plan.Stops {
+		if st.Node.Pinned {
+			pinned++
+		}
+	}
+	if pinned != 1 {
+		t.Fatalf("got %d pinned stops, want 1: %+v", pinned, resp.Plan.Stops)
+	}
+	if len(resp.MissedPins) != 1 || resp.MissedPins[0] != offCourse {
+		t.Fatalf("missed pins %v, want [%v]", resp.MissedPins, offCourse)
+	}
+}
