@@ -16,6 +16,22 @@ import (
 // island is a point the fake OSRM cannot route to or from.
 var island = geo.LatLon{Lat: 0.5, Lon: 0.5}
 
+// faraway is outside the fake OSRM's data: it snaps 50 km to reach a
+// street, as a point in another city would.
+var faraway = geo.LatLon{Lat: 0.9, Lon: 0.9}
+
+func snaps(ps []geo.LatLon) []map[string]any {
+	var ws []map[string]any
+	for _, p := range ps {
+		d := 0.0
+		if p == faraway {
+			d = 50000
+		}
+		ws = append(ws, map[string]any{"distance": d})
+	}
+	return ws
+}
+
 func parseCoords(t *testing.T, s string) []geo.LatLon {
 	var ps []geo.LatLon
 	for _, c := range strings.Split(s, ";") {
@@ -77,6 +93,7 @@ func fakeOSRMProfile(t *testing.T, profile string, routes, tables *int32) *httpt
 				return
 			}
 			route := map[string]any{"duration": geo.Distance(ps[0], ps[1])}
+			wps := snaps(ps)
 			if full {
 				var line [][2]float64
 				for _, p := range []geo.LatLon{ps[0], corner(ps[0], ps[1]), ps[1]} {
@@ -84,7 +101,7 @@ func fakeOSRMProfile(t *testing.T, profile string, routes, tables *int32) *httpt
 				}
 				route["geometry"] = map[string]any{"type": "LineString", "coordinates": line}
 			}
-			json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "routes": []map[string]any{route}})
+			json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "routes": []map[string]any{route}, "waypoints": wps})
 		case "table":
 			atomic.AddInt32(tables, 1)
 			if len(ps) > 4 {
@@ -105,7 +122,14 @@ func fakeOSRMProfile(t *testing.T, profile string, routes, tables *int32) *httpt
 				}
 				rows = append(rows, row)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "durations": rows})
+			var srcs, dsts []geo.LatLon
+			for _, i := range src {
+				srcs = append(srcs, ps[i])
+			}
+			for _, j := range dst {
+				dsts = append(dsts, ps[j])
+			}
+			json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "durations": rows, "sources": snaps(srcs), "destinations": snaps(dsts)})
 		default:
 			t.Errorf("unexpected service %s", parts[1])
 		}
@@ -212,6 +236,33 @@ func TestOSRMDriveFactorAndOverhead(t *testing.T) {
 	}
 }
 
+func TestOSRMOutsideDataUsesFallback(t *testing.T) {
+	var routes, tables int32
+	srv := fakeOSRM(t, &routes, &tables)
+	defer srv.Close()
+	a := geo.LatLon{Lat: 0.001}
+	want, _ := Haversine{}.Duration(a, faraway, Walk)
+	o := &OSRM{BaseURL: srv.URL}
+	if d, ok := o.Duration(a, faraway, Walk); !ok || d != want {
+		t.Fatalf("route to a point outside the data: %f %v, want fallback %f", d, ok, want)
+	}
+	if steps, ok := o.Steps(a, faraway, Walk); !ok || steps[0].Path != nil || steps[0].Seconds != want {
+		t.Fatalf("steps outside the data: %+v", steps)
+	}
+	p := &OSRM{BaseURL: srv.URL, ChunkSize: 2}
+	p.Prefetch([]geo.LatLon{a, faraway, {}})
+	before := routes
+	if d, ok := p.Duration(faraway, a, Walk); !ok || d != want {
+		t.Fatalf("prefetched pair outside the data: %f %v, want fallback %f", d, ok, want)
+	}
+	if d, ok := p.Duration(a, geo.LatLon{}, Walk); !ok || math.Abs(d-geo.Distance(a, geo.LatLon{})) > 0.5 {
+		t.Fatalf("prefetched pair inside the data: %f %v", d, ok)
+	}
+	if routes != before {
+		t.Fatal("prefetched pairs should not need route requests")
+	}
+}
+
 func TestOSRMPrefetch(t *testing.T) {
 	var routes, tables int32
 	srv := fakeOSRM(t, &routes, &tables)
@@ -261,7 +312,7 @@ func TestOSRMFallsBackWhenDown(t *testing.T) {
 func TestOSRMMemoIsBounded(t *testing.T) {
 	o := &OSRM{MaxMemo: 2}
 	for i := range 5 {
-		o.store([2]geo.LatLon{{Lat: float64(i)}, {}}, cacheVal{ok: true})
+		o.store([2]geo.LatLon{{Lat: float64(i)}, {}}, osrmVal{ok: true})
 		if len(o.memo) > 2 {
 			t.Fatalf("memo grew to %d", len(o.memo))
 		}
