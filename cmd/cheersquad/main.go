@@ -30,21 +30,34 @@ func main() {
 
 	nets := loadNetworks(*gtfsDir)
 	cfg := api.Config{Networks: nets[api.Sunday], DayNetworks: nets}
+	// Each router gets a second client that leaves ferries out, for
+	// spectators who ask to avoid them. It has its own cache.
+	cfg.NoFerry = map[travel.Mode]travel.Provider{}
+	routed := func(name string, mk func() *travel.OSRM) *travel.OSRM {
+		o, noFerry := mk(), mk()
+		noFerry.Exclude = "ferry"
+		cfg.NoFerry[o.Mode] = noFerry
+		log.Printf("%s routes from OSRM at %s", name, o.BaseURL)
+		return o
+	}
 	if *osrmWalk != "" {
-		cfg.Walk = &travel.OSRM{BaseURL: *osrmWalk}
-		log.Printf("walking routes from OSRM at %s", *osrmWalk)
+		cfg.Walk = routed("walking", func() *travel.OSRM {
+			return &travel.OSRM{BaseURL: *osrmWalk, Mode: travel.Walk}
+		})
 	}
 	if *osrmBike != "" {
 		// Crowds near the course slow bikes, and the bike has to be locked
 		// up and left a short walk from each spot.
-		cfg.Bike = &travel.OSRM{BaseURL: *osrmBike, Mode: travel.Bike, Factor: 1.2, Overhead: 120}
-		log.Printf("biking routes from OSRM at %s", *osrmBike)
+		cfg.Bike = routed("biking", func() *travel.OSRM {
+			return &travel.OSRM{BaseURL: *osrmBike, Mode: travel.Bike, Factor: 1.2, Overhead: 120}
+		})
 	}
 	if *osrmDrive != "" {
 		// OSRM assumes empty streets; race-day traffic is slower, and every
 		// stop means finding parking and walking to the course.
-		cfg.Drive = &travel.OSRM{BaseURL: *osrmDrive, Mode: travel.Drive, Factor: 1.5, Overhead: 600}
-		log.Printf("driving routes from OSRM at %s", *osrmDrive)
+		cfg.Drive = routed("driving", func() *travel.OSRM {
+			return &travel.OSRM{BaseURL: *osrmDrive, Mode: travel.Drive, Factor: 1.5, Overhead: 600}
+		})
 	}
 
 	mux := http.NewServeMux()

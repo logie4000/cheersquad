@@ -30,6 +30,7 @@ export interface PlanParams {
     mode: Mode;
     bufferSeconds: number;
     raceDay: RaceDay;
+    avoidFerries: boolean;
   };
   certifiedMeters?: number;
   spacingMeters?: number;
@@ -252,6 +253,7 @@ export interface PlanForm {
   spectatorStart: string; // HH:MM
   mode: Mode;
   raceDay: RaceDay;
+  avoidFerries: boolean; // street routes skip ferries
   bufferMinutes: number;
   maxStops: number;
   lateFrom: number | null; // weight spots from this mile or km on
@@ -311,6 +313,7 @@ export function buildParams(f: PlanForm, marks: MapMarks): PlanParams | string {
       mode: f.mode,
       bufferSeconds: f.bufferMinutes * 60,
       raceDay: f.raceDay,
+      avoidFerries: f.avoidFerries,
     },
     certifiedMeters,
     pinned: marks.pinned,

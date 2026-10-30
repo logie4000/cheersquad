@@ -51,7 +51,7 @@ label {
   margin-top: 0.5rem;
   font-size: 0.9rem;
 }
-label input:not([type='radio']),
+label input:not([type='radio']):not([type='checkbox']),
 label select {
   display: block;
   width: 100%;
@@ -62,6 +62,11 @@ label select {
   border-radius: 6px;
   background: var(--bg);
   color: inherit;
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 label input[type='file'] {
   padding: 0.3rem;

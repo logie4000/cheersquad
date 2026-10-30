@@ -216,6 +216,14 @@ docker logs --since 30m cheersquad 2>&1 | grep 'plan:'   # one line per plan: si
 docker logs --since 30m cheersquad-osrm-foot 2>&1 | tail # every request OSRM served, with its time
 ```
 
+**Avoiding ferries.** The "Avoid ferries" box in the form routes walking (also
+the walks in transit mode), biking and driving without ferries, such as the
+Staten Island Ferry. The car profile supports this as it ships; foot and
+bicycle are built through `deploy/osrm/excludable-ferry.lua`, which tags
+ferries so a request can leave them out. Data built before that wrapper
+existed can't: the server logs "refused exclude=ferry" once and routes as
+usual until you rebuild with `build-osrm.sh`.
+
 How times are adjusted: walking uses OSRM's times as they are. Biking adds
 20% for crowds and 2 minutes per stop to lock up the bike. Driving adds 50%
 for race-day traffic and 10 minutes per stop to park and walk to the

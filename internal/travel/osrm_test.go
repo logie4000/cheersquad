@@ -318,3 +318,55 @@ func TestOSRMMemoIsBounded(t *testing.T) {
 		}
 	}
 }
+
+// ferryOSRM answers routes in 100 s, or 500 s with exclude=ferry, or refuses
+// exclude like a server built without excludable ferries.
+func ferryOSRM(t *testing.T, excludable bool, excludes *int32) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d := 100.0
+		if ex := r.URL.Query().Get("exclude"); ex != "" {
+			atomic.AddInt32(excludes, 1)
+			if ex != "ferry" || !excludable {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"code":"InvalidValue","message":"Exclude flag combination is not supported."}`))
+				return
+			}
+			d = 500
+		}
+		json.NewEncoder(w).Encode(map[string]any{"code": "Ok", "routes": []map[string]any{{"duration": d}}})
+	}))
+}
+
+func TestOSRMExclude(t *testing.T) {
+	var excludes int32
+	srv := ferryOSRM(t, true, &excludes)
+	defer srv.Close()
+	a, b := geo.LatLon{}, geo.LatLon{Lat: 0.01}
+	o := &OSRM{BaseURL: srv.URL, Exclude: "ferry"}
+	if d, ok := o.Duration(a, b, Walk); !ok || d != 500 || excludes != 1 {
+		t.Fatalf("exclude=ferry: %f %v, %d requests with exclude", d, ok, excludes)
+	}
+	if o.String() != "OSRM foot routing without ferries" {
+		t.Fatalf("name %q", o.String())
+	}
+	plain := &OSRM{BaseURL: srv.URL}
+	if d, _ := plain.Duration(a, b, Walk); d != 100 || excludes != 1 {
+		t.Fatalf("no exclude: %f, %d requests with exclude", d, excludes)
+	}
+}
+
+func TestOSRMExcludeUnsupported(t *testing.T) {
+	var excludes int32
+	srv := ferryOSRM(t, false, &excludes)
+	defer srv.Close()
+	o := &OSRM{BaseURL: srv.URL, Exclude: "ferry"}
+	a := geo.LatLon{}
+	for i := range 3 {
+		if d, ok := o.Duration(a, geo.LatLon{Lat: float64(i+1) / 100}, Walk); !ok || d != 100 {
+			t.Fatalf("leg %d: %f %v, want the router's time without exclude", i, d, ok)
+		}
+	}
+	if excludes != 1 {
+		t.Fatalf("%d requests with exclude, want 1 (then routed without it)", excludes)
+	}
+}

@@ -32,6 +32,7 @@ const form: PlanForm = {
   spectatorStart: '06:30',
   mode: 'bike',
   raceDay: 'weekday',
+  avoidFerries: true,
   bufferMinutes: 3,
   maxStops: 0,
   lateFrom: 20,
@@ -75,6 +76,7 @@ describe('buildParams', () => {
     expect(p.spectator.startTimeSeconds).toBe(-1800);
     expect(p.spectator.bufferSeconds).toBe(180);
     expect(p.spectator.raceDay).toBe('weekday');
+    expect(p.spectator.avoidFerries).toBe(true);
     expect(p.certifiedMeters).toBe(42195);
     expect(p.excluded).toEqual([{ center: { lat: 3, lon: 4 }, radius: 150 }]);
     expect(p.mileWeights?.['20']).toBe(2);
