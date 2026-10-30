@@ -18,9 +18,7 @@ func main() {
 	addr := flag.String("addr", envOr("ADDR", ":8080"), "listen address")
 	static := flag.String("static", envOr("STATIC_DIR", "web/dist"), "directory of built UI files")
 	gtfsDir := flag.String("gtfs-dir", envOr("GTFS_DIR", ""), "directory of GTFS feeds for subway routing (empty: straight-line transit estimate)")
-	osrmWalk := flag.String("osrm-walk-url", envOr("OSRM_WALK_URL", ""), "OSRM server with a foot profile for walking times and routes (empty: straight-line estimate)")
-	osrmBike := flag.String("osrm-bike-url", envOr("OSRM_BIKE_URL", ""), "OSRM server with a bicycle profile for biking times and routes (empty: straight-line estimate)")
-	osrmDrive := flag.String("osrm-drive-url", envOr("OSRM_DRIVE_URL", ""), "OSRM server with a car profile for driving times and routes (empty: straight-line estimate)")
+	osrmWalk := flag.String("osrm-walk-url", envOr("OSRM_WALK_URL", ""), "OSRM server with a foot profile for walking times (empty: straight-line estimate)")
 	healthcheck := flag.Bool("healthcheck", false, "probe /api/healthz on addr and exit (for Docker HEALTHCHECK)")
 	flag.Parse()
 
@@ -30,34 +28,9 @@ func main() {
 
 	nets := loadNetworks(*gtfsDir)
 	cfg := api.Config{Networks: nets[api.Sunday], DayNetworks: nets}
-	// Each router gets a second client that leaves ferries out, for
-	// spectators who ask to avoid them. It has its own cache.
-	cfg.NoFerry = map[travel.Mode]travel.Provider{}
-	routed := func(name string, mk func() *travel.OSRM) *travel.OSRM {
-		o, noFerry := mk(), mk()
-		noFerry.Exclude = "ferry"
-		cfg.NoFerry[o.Mode] = noFerry
-		log.Printf("%s routes from OSRM at %s", name, o.BaseURL)
-		return o
-	}
 	if *osrmWalk != "" {
-		cfg.Walk = routed("walking", func() *travel.OSRM {
-			return &travel.OSRM{BaseURL: *osrmWalk, Mode: travel.Walk}
-		})
-	}
-	if *osrmBike != "" {
-		// Crowds near the course slow bikes, and the bike has to be locked
-		// up and left a short walk from each spot.
-		cfg.Bike = routed("biking", func() *travel.OSRM {
-			return &travel.OSRM{BaseURL: *osrmBike, Mode: travel.Bike, Factor: 1.2, Overhead: 120}
-		})
-	}
-	if *osrmDrive != "" {
-		// OSRM assumes empty streets; race-day traffic is slower, and every
-		// stop means finding parking and walking to the course.
-		cfg.Drive = routed("driving", func() *travel.OSRM {
-			return &travel.OSRM{BaseURL: *osrmDrive, Mode: travel.Drive, Factor: 1.5, Overhead: 600}
-		})
+		cfg.Walk = &travel.OSRM{BaseURL: *osrmWalk}
+		log.Printf("walking times from OSRM at %s", *osrmWalk)
 	}
 
 	mux := http.NewServeMux()

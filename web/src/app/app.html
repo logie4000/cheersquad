@@ -82,9 +82,6 @@
           </select>
         </label>
       }
-      <label class="check">
-        <input type="checkbox" formControlName="avoidFerries" /> Avoid ferries
-      </label>
       <label
         >Arrive at least (min) before <input type="number" min="0" formControlName="bufferMinutes"
       /></label>
@@ -123,7 +120,10 @@
           </label>
         }
       </div>
-      <small>Crossing points are where you can cross the course while it's closed.</small>
+      <small
+        >Pinned spots are places you want to be: the plan includes them whenever you can get there
+        in time. Crossing points are where you can cross the course while it's closed.</small
+      >
       <button type="button" class="link" (click)="clearMarks()">
         Clear pins, exclusions and crossings
       </button>
@@ -208,6 +208,12 @@
         @if (r.routing) {
           <p class="note routing">Routing: {{ r.routing }}</p>
         }
+        @if (r.missedPins?.length; as n) {
+          <p class="note missed-pins" role="status">
+            {{ n === 1 ? '1 pinned spot is' : n + ' pinned spots are' }} not in the plan: too far
+            from the course (over 100 m) or not reachable in time.
+          </p>
+        }
         <table>
           <thead>
             <tr>
@@ -223,7 +229,12 @@
             @for (s of r.plan.stops; track s.node.id; let i = $index) {
               @let steps = legs()[i];
               <tr [class.has-leg]="steps.length > 0">
-                <td>{{ i + 1 }}</td>
+                <td>
+                  {{ i + 1 }}
+                  @if (s.node.pinned) {
+                    <span class="pinned" title="Pinned spot">♥</span>
+                  }
+                </td>
                 <td>
                   <a [href]="mapsLink(s.node.pos)" target="_blank" rel="noopener">{{
                     distance(s.node.dist)

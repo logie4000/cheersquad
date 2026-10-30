@@ -391,80 +391,34 @@ func TestPlanStopsWhenContextEnds(t *testing.T) {
 	}
 }
 
-// streetRouter drives at 10 m/s along a two-segment "street" path through
-// a corner, and records Prefetch calls.
-type streetRouter struct {
-	prefetchWalk
-}
-
-func (streetRouter) Duration(a, b geo.LatLon, m travel.Mode) (float64, bool) {
-	return geo.Distance(a, b) / 10, true
-}
-
-func (r streetRouter) Steps(a, b geo.LatLon, m travel.Mode) ([]travel.Step, bool) {
-	s, _ := r.Duration(a, b, m)
-	path := []geo.LatLon{a, {Lat: a.Lat, Lon: b.Lon}, b}
-	return []travel.Step{{Kind: travel.StepDrive, FromPos: a, ToPos: b, Path: path, Seconds: s}}, true
-}
-
-func (streetRouter) String() string { return "test streets" }
-
-func TestPlanDriveUsesStreetRouter(t *testing.T) {
-	drive := &streetRouter{}
-	params := `{
-		"runner": {"finishSeconds": 3000},
-		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "drive", "bufferSeconds": 60, "startTimeSeconds": -600},
-		"certifiedMeters": 10000,
-		"spacingMeters": 1000
-	}`
-	rec := requestWith(t, Config{Drive: drive}, straightGPX, params)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", rec.Code, rec.Body)
-	}
-	var resp Response
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+func TestPlanVisitsPinsAndReportsMissed(t *testing.T) {
+	track, err := gpx.Parse(strings.NewReader(straightGPX))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Routing != "Driving: test streets" {
-		t.Fatalf("routing %q", resp.Routing)
+	// A cyclist from the start line; one pin on the course at 6.5 km, one
+	// 1 km off it.
+	onCourse := track.PointAt(6500)
+	offCourse := geo.LatLon{Lat: onCourse.Lat, Lon: 0.01}
+	p := Params{
+		Runner:    Runner{FinishSeconds: 3000},
+		Spectator: Spectator{Mode: travel.Bike, StartTimeSeconds: -600},
+		Pinned:    []geo.LatLon{onCourse, offCourse},
 	}
-	if len(drive.points) == 0 {
-		t.Fatal("drive router was not prefetched")
+	resp, err := Plan(context.Background(), track, p, Config{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(resp.Legs) == 0 || len(resp.Legs[0]) != 1 || len(resp.Legs[0][0].Path) != 3 {
-		t.Fatalf("legs should carry the street path: %+v", resp.Legs)
-	}
-	// Walking still uses the stub when only a drive router is set.
-	params = strings.Replace(params, `"drive"`, `"walk"`, 1)
-	rec = requestWith(t, Config{Drive: drive}, straightGPX, params)
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Routing != "Walking: straight-line estimate" {
-		t.Fatalf("walk routing %q (%v)", resp.Routing, err)
-	}
-}
-
-func TestPlanAvoidFerriesUsesNoFerryRouter(t *testing.T) {
-	params := `{
-		"runner": {"finishSeconds": 3000},
-		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "drive", "avoidFerries": %s, "startTimeSeconds": -600},
-		"certifiedMeters": 10000,
-		"spacingMeters": 1000
-	}`
-	cfg := Config{Drive: &streetRouter{}, NoFerry: map[travel.Mode]travel.Provider{travel.Drive: noFerryRouter{}, travel.Walk: noFerryRouter{}}}
-	for avoid, want := range map[string]string{"false": "Driving: test streets", "true": "Driving: no ferries"} {
-		rec := requestWith(t, cfg, straightGPX, fmt.Sprintf(params, avoid))
-		var resp Response
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Routing != want {
-			t.Errorf("avoidFerries %s: routing %q (%v), want %q", avoid, resp.Routing, err, want)
+	pinned := 0
+	for _, st := range resp.Plan.Stops {
+		if st.Node.Pinned {
+			pinned++
 		}
 	}
-	// A mode with no usual router keeps the stub even when avoiding ferries.
-	rec := requestWith(t, cfg, straightGPX, strings.Replace(fmt.Sprintf(params, "true"), `"drive"`, `"walk"`, 1))
-	var resp Response
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Routing != "Walking: straight-line estimate" {
-		t.Errorf("walk without a walk router: routing %q (%v)", resp.Routing, err)
+	if pinned != 1 {
+		t.Fatalf("got %d pinned stops, want 1: %+v", pinned, resp.Plan.Stops)
+	}
+	if len(resp.MissedPins) != 1 || resp.MissedPins[0] != offCourse {
+		t.Fatalf("missed pins %v, want [%v]", resp.MissedPins, offCourse)
 	}
 }
-
-type noFerryRouter struct{ travel.Haversine }
-
-func (noFerryRouter) String() string { return "no ferries" }

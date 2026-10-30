@@ -1,8 +1,5 @@
 .env
-.env.prev
 # GTFS feeds are downloaded on the host (deploy/scripts/fetch-gtfs.sh).
 gtfs/*
 !gtfs/.gitkeep
 __pycache__/
-# OSRM street-routing data is built on the host (deploy/scripts/build-osrm.sh).
-/osrm/
