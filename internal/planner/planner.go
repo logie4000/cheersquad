@@ -11,6 +11,11 @@
 // The spectator leaves a spot only once the runner's latest pass time has
 // gone by, and must arrive buffer seconds before the earliest pass time at
 // the next one.
+//
+// Pinned nodes are must-visit spots: each carries a bonus larger than the
+// value of every unpinned node put together, so the plan includes as many
+// pinned sightings as can be reached and only then maximizes value. The
+// bonus is not counted in the plan's reported value.
 package planner
 
 import (
@@ -103,8 +108,15 @@ func Solve(start Start, nodes []candidates.Node, travel TravelFunc, p Params) Pl
 		}
 	}
 	w := make([]float64, n)
+	bonus := 1.0
 	for k := range ns {
 		w[k] = ns[k].Weight - p.StopPenalty
+		bonus += math.Abs(w[k])
+	}
+	for k := range ns {
+		if ns[k].Pinned {
+			w[k] += bonus
+		}
 	}
 
 	layers := p.MaxStops
@@ -166,9 +178,10 @@ func Solve(start Start, nodes []candidates.Node, travel TravelFunc, p Params) Pl
 			m--
 		}
 	}
-	plan := Plan{Value: bv, Sightings: len(chain)}
+	plan := Plan{Sightings: len(chain)}
 	for i := len(chain) - 1; i >= 0; i-- {
 		k := chain[i]
+		plan.Value += ns[k].Weight - p.StopPenalty
 		st := Stop{Node: ns[k], Depart: start.Time, Travel: fromStart[k]}
 		if i < len(chain)-1 {
 			j := chain[i+1]

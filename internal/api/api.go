@@ -164,6 +164,9 @@ type Response struct {
 	// Legs[i] is how to get to Plan.Stops[i] from the previous stop (or
 	// the start). Its steps' seconds sum to that stop's travel time.
 	Legs [][]travel.Step `json:"legs"`
+	// MissedPins are the pinned spots the plan does not visit, because
+	// they are too far from the course or cannot be reached in time.
+	MissedPins []geo.LatLon `json:"missedPins"`
 }
 
 // Config is what the server knows beyond a single request.
@@ -409,7 +412,26 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		Plan:       plan,
 		Routing:    rt.label,
 		Legs:       legs,
+		MissedPins: missedPins(p.Pinned, plan.Stops),
 	}, nil
+}
+
+// missedPins returns the pins with no pinned stop within snapping distance.
+func missedPins(pins []geo.LatLon, stops []planner.Stop) []geo.LatLon {
+	missed := []geo.LatLon{}
+	for _, pin := range pins {
+		hit := false
+		for _, st := range stops {
+			if st.Node.Pinned && geo.Distance(pin, st.Node.Pos) <= candidates.DefaultSnapRadius+1 {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			missed = append(missed, pin)
+		}
+	}
+	return missed
 }
 
 // checkLimits rejects requests big enough to exhaust memory or CPU, and
