@@ -86,6 +86,8 @@ export interface PlanResponse {
   routing?: string;
   /** legs[i] is how to get to stop i from the previous stop (or the start). */
   legs?: Step[][];
+  /** Pinned spots the plan could not visit: off the course or not reachable in time. */
+  missedPins?: LatLon[];
 }
 
 /** A preloaded race course from GET api/races. */
