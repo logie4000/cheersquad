@@ -10,69 +10,39 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/logie4000/cheersquad/internal/geo"
 )
 
-// OSRM times legs in one mode over the street network with an OSRM server
-// built for that mode's profile (foot, bicycle or car); each OSRM server
-// serves one profile. Only Mode is routed (the walking parts of transit are
-// asked as Walk too); other modes, and every leg while the server is
-// unreachable, use Fallback, so a plan always comes back.
+// OSRM times walking legs with an OSRM server's foot profile. Only mode Walk
+// is routed (the walking parts of transit are asked as Walk too); other
+// modes, and every leg while the server is unreachable, use Fallback, so a
+// plan always comes back.
 type OSRM struct {
 	// BaseURL is the server root, e.g. "http://osrm:5000".
 	BaseURL string
-	// Mode is the mode this server routes. Empty means Walk.
-	Mode Mode
-	// Profile is the OSRM profile name in request URLs. Empty means foot,
-	// bicycle or car by Mode. (osrm-routed answers with its one dataset
-	// whatever the name.)
+	// Profile is the OSRM profile name. Empty means "foot".
 	Profile string
 	// Client is the HTTP client. Nil means one with a 10 s timeout.
 	Client *http.Client
-	// Fallback answers when OSRM cannot, and for modes other than Mode.
+	// Fallback answers when OSRM cannot, and for modes other than Walk.
 	Fallback Haversine
-	// Factor multiplies OSRM's durations, which assume free-flowing streets
-	// (race-day traffic for cars). Zero means 1.
-	Factor float64
-	// Overhead is seconds added to every routed leg: parking a car or
-	// locking a bike and walking to the course. A leg detoured through a
-	// crossing point is two routed legs and gets it twice.
-	Overhead float64
-	// SpeedBound is the speed bound in m/s, before Factor, reported by
-	// MaxSpeed. It must exceed any speed the profile uses (OSRM foot is
-	// 5 km/h, ~1.4 m/s). Zero means 2.0 for Walk, 8.0 for Bike and 40 for
-	// Drive.
+	// SpeedBound is the walking speed bound in m/s reported by MaxSpeed. It
+	// must exceed the profile's speed (OSRM foot is 5 km/h, ~1.4 m/s).
+	// Zero means 2.0.
 	SpeedBound float64
 	// ChunkSize caps sources and destinations per /table request, so one
 	// request has at most 2*ChunkSize locations. Zero means 50, which fits
 	// OSRM's default --max-table-size of 100.
 	ChunkSize int
-	// Exclude is a comma-separated list of road classes to avoid, sent with
-	// every request ("ferry"). The server's profile must make them
-	// excludable (deploy/osrm/excludable-ferry.lua); if it doesn't, requests
-	// go without it and the first refusal is logged.
-	Exclude string
-	// MaxSnap is how far in meters a point may be from the nearest street in
-	// OSRM's data. OSRM snaps any point to its nearest street, however far,
-	// so a point outside the area the data covers (another city) would get a
-	// time between two unrelated streets; such legs use Fallback instead.
-	// Zero means 1000.
-	MaxSnap float64
 	// MaxMemo caps cached pairs; the cache is shared by every request, so
 	// when full it is cleared rather than growing without bound. Zero means
 	// 2M pairs (roughly 200 MB).
 	MaxMemo int
 
-	// tables and routes count requests sent, for Requests.
-	tables, routes atomic.Int64
-	// noExclude is set once the server refuses Exclude.
-	noExclude atomic.Bool
-
 	mu        sync.Mutex
-	memo      map[[2]geo.LatLon]osrmVal
+	memo      map[[2]geo.LatLon]cacheVal
 	downUntil time.Time
 	logged    bool
 }
@@ -80,69 +50,19 @@ type OSRM struct {
 // errNoRoute is OSRM saying the points are not connected on foot.
 var errNoRoute = errors.New("osrm: no route")
 
-// errOutside is a point further than MaxSnap from OSRM's streets.
-var errOutside = errors.New("osrm: point outside the routing data")
-
-// osrmVal is a memoized OSRM answer. outside means a point was beyond
-// MaxSnap, so the leg is Fallback's.
-type osrmVal struct {
-	s           float64
-	ok, outside bool
-}
-
-func (o *OSRM) maxSnap() float64 {
-	if o.MaxSnap <= 0 {
-		return 1000
-	}
-	return o.MaxSnap
-}
-
-// waypoint is a location as OSRM snapped it; Distance is how far it moved.
-type waypoint struct {
-	Distance float64 `json:"distance"`
-}
-
 // osrmRetry is how long OSRM is skipped after a network error, so a down
 // server costs one timeout per plan rather than one per pair.
 const osrmRetry = time.Minute
 
 func (o *OSRM) String() string {
-	switch o.Exclude {
-	case "":
-		return fmt.Sprintf("OSRM %s routing", o.profile())
-	case "ferry":
-		return fmt.Sprintf("OSRM %s routing without ferries", o.profile())
-	}
-	return fmt.Sprintf("OSRM %s routing avoiding %s", o.profile(), o.Exclude)
-}
-
-func (o *OSRM) mode() Mode {
-	if o.Mode == "" {
-		return Walk
-	}
-	return o.Mode
+	return fmt.Sprintf("OSRM %s routing", o.profile())
 }
 
 func (o *OSRM) profile() string {
-	if o.Profile != "" {
-		return o.Profile
+	if o.Profile == "" {
+		return "foot"
 	}
-	switch o.mode() {
-	case Bike:
-		return "bicycle"
-	case Drive:
-		return "car"
-	}
-	return "foot"
-}
-
-// adjust turns an OSRM duration into a leg time.
-func (o *OSRM) adjust(s float64) float64 {
-	f := o.Factor
-	if f <= 0 {
-		f = 1
-	}
-	return s*f + o.Overhead
+	return o.Profile
 }
 
 func (o *OSRM) client() *http.Client {
@@ -153,7 +73,7 @@ func (o *OSRM) client() *http.Client {
 }
 
 func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
-	if m != o.mode() {
+	if m != Walk {
 		return o.Fallback.Duration(a, b, m)
 	}
 	k := [2]geo.LatLon{a, b}
@@ -161,32 +81,26 @@ func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 	v, hit := o.memo[k]
 	down := time.Now().Before(o.downUntil)
 	o.mu.Unlock()
-	if hit && v.outside {
-		return o.Fallback.Duration(a, b, m)
-	}
 	if hit {
-		return o.adjust(v.s), v.ok
+		return v.s, v.ok
 	}
 	if down {
 		return o.Fallback.Duration(a, b, m)
 	}
-	s, _, err := o.route(a, b, false)
+	s, err := o.route(a, b)
 	switch {
 	case err == nil:
-		o.store(k, osrmVal{s: s, ok: true})
-		return o.adjust(s), true
+		o.store(k, cacheVal{s, true})
+		return s, true
 	case errors.Is(err, errNoRoute):
-		o.store(k, osrmVal{})
+		o.store(k, cacheVal{0, false})
 		return 0, false
-	case errors.Is(err, errOutside):
-		o.store(k, osrmVal{outside: true})
-		return o.Fallback.Duration(a, b, m)
 	}
 	o.fail(err)
 	return o.Fallback.Duration(a, b, m)
 }
 
-func (o *OSRM) store(k [2]geo.LatLon, v osrmVal) {
+func (o *OSRM) store(k [2]geo.LatLon, v cacheVal) {
 	o.mu.Lock()
 	o.makeRoom(1)
 	o.memo[k] = v
@@ -201,7 +115,7 @@ func (o *OSRM) makeRoom(n int) {
 		limit = 2_000_000
 	}
 	if o.memo == nil || len(o.memo)+n > limit {
-		o.memo = map[[2]geo.LatLon]osrmVal{}
+		o.memo = map[[2]geo.LatLon]cacheVal{}
 	}
 }
 
@@ -212,7 +126,7 @@ func (o *OSRM) fail(err error) {
 	o.downUntil = time.Now().Add(osrmRetry)
 	if !o.logged {
 		o.logged = true
-		log.Printf("osrm %s: %v; falling back to straight-line estimates", o.profile(), err)
+		log.Printf("osrm: %v; falling back to straight-line walking estimates", err)
 	}
 }
 
@@ -227,39 +141,6 @@ func coords(ps []geo.LatLon) string {
 // get fetches an OSRM service URL and decodes the body into out. OSRM
 // answers NoRoute with a 400 and a JSON body, so the code field decides.
 func (o *OSRM) get(service, path string, q url.Values, out any) error {
-	if o.Exclude != "" && !o.noExclude.Load() {
-		err := o.send(service, path, withExclude(q, o.Exclude), out)
-		var bad errInvalid
-		if !errors.As(err, &bad) || !strings.Contains(bad.message, "xclude") {
-			return err
-		}
-		o.noExclude.Store(true)
-		log.Printf("osrm %s: server refused exclude=%s (%s); routing without it. Rebuild with deploy/scripts/build-osrm.sh to support it", o.profile(), o.Exclude, bad.message)
-	}
-	return o.send(service, path, q, out)
-}
-
-// errInvalid is OSRM refusing a request parameter.
-type errInvalid struct{ message string }
-
-func (e errInvalid) Error() string { return "osrm: invalid value: " + e.message }
-
-func withExclude(q url.Values, exclude string) url.Values {
-	c := url.Values{}
-	for k, v := range q {
-		c[k] = v
-	}
-	c.Set("exclude", exclude)
-	return c
-}
-
-// send makes one request; see get.
-func (o *OSRM) send(service, path string, q url.Values, out any) error {
-	if service == "table" {
-		o.tables.Add(1)
-	} else {
-		o.routes.Add(1)
-	}
 	u := strings.TrimRight(o.BaseURL, "/") + "/" + service + "/v1/" + o.profile() + "/" + path + "?" + q.Encode()
 	resp, err := o.client().Get(u)
 	if err != nil {
@@ -283,44 +164,23 @@ func (o *OSRM) send(service, path string, q url.Values, out any) error {
 		return json.Unmarshal(raw, out)
 	case "NoRoute":
 		return errNoRoute
-	case "InvalidValue":
-		return errInvalid{env.Message}
 	}
 	return fmt.Errorf("osrm %s: status %d code %q: %s", service, resp.StatusCode, env.Code, env.Message)
 }
 
-// route asks OSRM for the fastest a->b route: its raw duration and, if
-// path is true, its street geometry.
-func (o *OSRM) route(a, b geo.LatLon, path bool) (float64, []geo.LatLon, error) {
+func (o *OSRM) route(a, b geo.LatLon) (float64, error) {
 	var r struct {
 		Routes []struct {
 			Duration float64 `json:"duration"`
-			Geometry struct {
-				Coordinates [][2]float64 `json:"coordinates"`
-			} `json:"geometry"`
 		} `json:"routes"`
-		Waypoints []waypoint `json:"waypoints"`
 	}
-	q := url.Values{"overview": {"false"}}
-	if path {
-		q = url.Values{"overview": {"full"}, "geometries": {"geojson"}}
-	}
-	if err := o.get("route", coords([]geo.LatLon{a, b}), q, &r); err != nil {
-		return 0, nil, err
-	}
-	for _, w := range r.Waypoints {
-		if w.Distance > o.maxSnap() {
-			return 0, nil, errOutside
-		}
+	if err := o.get("route", coords([]geo.LatLon{a, b}), url.Values{"overview": {"false"}}, &r); err != nil {
+		return 0, err
 	}
 	if len(r.Routes) == 0 {
-		return 0, nil, errNoRoute
+		return 0, errNoRoute
 	}
-	var pts []geo.LatLon
-	for _, c := range r.Routes[0].Geometry.Coordinates {
-		pts = append(pts, geo.LatLon{Lat: c[1], Lon: c[0]})
-	}
-	return r.Routes[0].Duration, pts, nil
+	return r.Routes[0].Duration, nil
 }
 
 // Prefetch fills the cache with walking times between every ordered pair
@@ -374,9 +234,7 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 		q.Set("destinations", idx(dstOff, len(dst)))
 	}
 	var r struct {
-		Durations    [][]*float64 `json:"durations"`
-		Sources      []waypoint   `json:"sources"`
-		Destinations []waypoint   `json:"destinations"`
+		Durations [][]*float64 `json:"durations"`
 	}
 	if err := o.get("table", coords(locs), q, &r); err != nil {
 		if errors.Is(err, errNoRoute) {
@@ -387,9 +245,6 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 	if len(r.Durations) != len(src) {
 		return fmt.Errorf("osrm table: %d rows for %d sources", len(r.Durations), len(src))
 	}
-	outside := func(ws []waypoint, i int) bool {
-		return i < len(ws) && ws[i].Distance > o.maxSnap()
-	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.makeRoom(len(src) * len(dst))
@@ -398,12 +253,9 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 			return fmt.Errorf("osrm table: row of %d for %d destinations", len(row), len(dst))
 		}
 		for j, d := range row {
-			v := osrmVal{ok: d != nil}
+			v := cacheVal{ok: d != nil}
 			if d != nil {
 				v.s = *d
-			}
-			if outside(r.Sources, i) || outside(r.Destinations, j) {
-				v = osrmVal{outside: true}
 			}
 			o.memo[[2]geo.LatLon{src[i], dst[j]}] = v
 		}
@@ -411,59 +263,25 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 	return nil
 }
 
-// Steps is a single step lasting Duration's time. For Mode it carries the
-// street route OSRM takes as its Path, from a to b (OSRM snaps the ends to
-// the nearest street, so a and b are added at the ends). Without a route,
-// because OSRM is down or the leg came from Fallback, Path is empty and the
-// map draws a straight line.
+// Steps is a single step: OSRM is asked for durations only, not paths.
 func (o *OSRM) Steps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 	s, ok := o.Duration(a, b, m)
 	if !ok {
 		return nil, false
 	}
-	st := Step{Kind: StepKindFor(m), FromPos: a, ToPos: b, Seconds: s}
-	o.mu.Lock()
-	down := time.Now().Before(o.downUntil)
-	o.mu.Unlock()
-	if m == o.mode() && !down && a != b {
-		_, pts, err := o.route(a, b, true)
-		switch {
-		case err == nil && len(pts) > 0:
-			st.Path = append(append([]geo.LatLon{a}, pts...), b)
-		case err != nil && !errors.Is(err, errNoRoute) && !errors.Is(err, errOutside):
-			o.fail(err)
-		}
-	}
-	return []Step{st}, true
+	return []Step{{Kind: StepKindFor(m), FromPos: a, ToPos: b, Seconds: s}}, true
 }
 
-// MaxSpeed is SpeedBound / Factor for Mode and Fallback's bound otherwise.
-// Overhead only makes legs slower, so it is left out. While OSRM is down
-// legs come from Fallback, so its bound counts too.
+// MaxSpeed is SpeedBound for Walk and Fallback's bound otherwise. While
+// OSRM is down Walk legs come from Fallback, whose walking bound (1.3 m/s by
+// default) is below SpeedBound's default.
 func (o *OSRM) MaxSpeed(m Mode) float64 {
-	if m != o.mode() {
+	if m != Walk {
 		return o.Fallback.MaxSpeed(m)
 	}
 	b := o.SpeedBound
 	if b <= 0 {
-		switch m {
-		case Bike:
-			b = 8.0
-		case Drive:
-			b = 40
-		default:
-			b = 2.0
-		}
+		b = 2.0
 	}
-	f := o.Factor
-	if f <= 0 {
-		f = 1
-	}
-	return max(b/f, o.Fallback.MaxSpeed(m))
-}
-
-// Requests returns how many /table and /route requests have been sent so
-// far, so callers can log what a plan cost.
-func (o *OSRM) Requests() (tables, routes int64) {
-	return o.tables.Load(), o.routes.Load()
+	return max(b, o.Fallback.MaxSpeed(Walk))
 }

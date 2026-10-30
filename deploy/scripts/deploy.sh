@@ -24,45 +24,12 @@ export AWS_REGION
 export ECR_REGISTRY="${ECR_REGISTRY:-$account.dkr.ecr.$AWS_REGION.amazonaws.com}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cheersquad}"
 export IMAGE_TAG="${IMAGE_TAG:-latest}"
-
-# Street routers: run one for each OSRM profile deploy/scripts/build-osrm.sh
-# has built, and point the app at it.
-osrm_profiles=() osrm_env=()
-for p in foot:WALK bicycle:BIKE car:DRIVE; do
-  name=${p%:*}
-  if [ -e "osrm/$name/area.osrm.mldgr" ]; then
-    osrm_profiles+=("osrm-$name")
-    osrm_env+=("OSRM_${p#*:}_URL=http://osrm-$name:5000")
-  fi
-done
-[ ! -f .env ] || cp .env .env.prev
 cat > .env <<ENV
 AWS_REGION=$AWS_REGION
 ECR_REGISTRY=$ECR_REGISTRY
 COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
 IMAGE_TAG=$IMAGE_TAG
-COMPOSE_PROFILES=$(IFS=,; echo "${osrm_profiles[*]}")
-$(printf '%s\n' "${osrm_env[@]}")
 ENV
-# Router limits (see docker-compose.yml): set one for a run, e.g.
-# OSRM_MEM_LIMIT=3g deploy/scripts/deploy.sh, and later runs keep it.
-for v in OSRM_MEM_LIMIT OSRM_CPUS OSRM_THREADS; do
-  val=${!v:-$(sed -n "s/^$v=//p" .env.prev 2>/dev/null || true)}
-  [ -z "$val" ] || echo "$v=$val" >> .env
-done
-# Each router's memory limit: OSRM_MEM_LIMIT for all of them if set,
-# otherwise its data size plus a quarter and 256 MB, so all of its
-# memory-mapped files can stay cached.
-mem_all=$(sed -n 's/^OSRM_MEM_LIMIT=//p' .env)
-for p in "${osrm_profiles[@]}"; do
-  name=${p#osrm-}
-  limit=$mem_all
-  [ -n "$limit" ] || limit="$(($(du -sm "osrm/$name" | cut -f1) * 5 / 4 + 256))m"
-  echo "OSRM_${name^^}_MEM_LIMIT=$limit" >> .env
-  echo "$p memory limit $limit"
-done
-rm -f .env.prev
-[ ${#osrm_profiles[@]} -eq 0 ] || echo "street routing: ${osrm_profiles[*]}"
 echo "deploying $COMPOSE_PROJECT_NAME-app:$IMAGE_TAG"
 
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"

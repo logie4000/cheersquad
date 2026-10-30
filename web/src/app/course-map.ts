@@ -222,10 +222,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
     });
   }
 
-  /**
-   * Walks are dashed black lines; rides are solid in the line's color; bike
-   * and drive legs are solid when they follow streets, dashed otherwise.
-   */
+  /** Walks are dashed black lines; rides are solid in the line's color. */
   private drawStep(st: Step): void {
     const via = st.via ?? [];
     // Rides follow the track when the feed has shapes, otherwise a straight
@@ -247,11 +244,7 @@ export class CourseMap implements AfterViewInit, OnDestroy {
         style = { color: lineColor(st.color) ?? LEG, weight: 4, opacity: 0.85 };
         break;
       default:
-        // Bike and drive legs routed along streets are solid; straight-line
-        // estimates stay dashed.
-        style = track
-          ? { color: LEG, weight: 3, opacity: 0.85 }
-          : { color: LEG, weight: 3, dashArray: '6 6' };
+        style = { color: LEG, weight: 3, dashArray: '6 6' };
     }
     // Station names come from the feed; set them as text, not as tooltip HTML.
     const label = document.createElement('span');
