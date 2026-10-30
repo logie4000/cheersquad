@@ -50,6 +50,12 @@ type OSRM struct {
 	// request has at most 2*ChunkSize locations. Zero means 50, which fits
 	// OSRM's default --max-table-size of 100.
 	ChunkSize int
+	// MaxSnap is how far in meters a point may be from the nearest street in
+	// OSRM's data. OSRM snaps any point to its nearest street, however far,
+	// so a point outside the area the data covers (another city) would get a
+	// time between two unrelated streets; such legs use Fallback instead.
+	// Zero means 1000.
+	MaxSnap float64
 	// MaxMemo caps cached pairs; the cache is shared by every request, so
 	// when full it is cleared rather than growing without bound. Zero means
 	// 2M pairs (roughly 200 MB).
@@ -59,13 +65,35 @@ type OSRM struct {
 	tables, routes atomic.Int64
 
 	mu        sync.Mutex
-	memo      map[[2]geo.LatLon]cacheVal
+	memo      map[[2]geo.LatLon]osrmVal
 	downUntil time.Time
 	logged    bool
 }
 
 // errNoRoute is OSRM saying the points are not connected on foot.
 var errNoRoute = errors.New("osrm: no route")
+
+// errOutside is a point further than MaxSnap from OSRM's streets.
+var errOutside = errors.New("osrm: point outside the routing data")
+
+// osrmVal is a memoized OSRM answer. outside means a point was beyond
+// MaxSnap, so the leg is Fallback's.
+type osrmVal struct {
+	s           float64
+	ok, outside bool
+}
+
+func (o *OSRM) maxSnap() float64 {
+	if o.MaxSnap <= 0 {
+		return 1000
+	}
+	return o.MaxSnap
+}
+
+// waypoint is a location as OSRM snapped it; Distance is how far it moved.
+type waypoint struct {
+	Distance float64 `json:"distance"`
+}
 
 // osrmRetry is how long OSRM is skipped after a network error, so a down
 // server costs one timeout per plan rather than one per pair.
@@ -120,6 +148,9 @@ func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 	v, hit := o.memo[k]
 	down := time.Now().Before(o.downUntil)
 	o.mu.Unlock()
+	if hit && v.outside {
+		return o.Fallback.Duration(a, b, m)
+	}
 	if hit {
 		return o.adjust(v.s), v.ok
 	}
@@ -129,17 +160,20 @@ func (o *OSRM) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 	s, _, err := o.route(a, b, false)
 	switch {
 	case err == nil:
-		o.store(k, cacheVal{s, true})
+		o.store(k, osrmVal{s: s, ok: true})
 		return o.adjust(s), true
 	case errors.Is(err, errNoRoute):
-		o.store(k, cacheVal{0, false})
+		o.store(k, osrmVal{})
 		return 0, false
+	case errors.Is(err, errOutside):
+		o.store(k, osrmVal{outside: true})
+		return o.Fallback.Duration(a, b, m)
 	}
 	o.fail(err)
 	return o.Fallback.Duration(a, b, m)
 }
 
-func (o *OSRM) store(k [2]geo.LatLon, v cacheVal) {
+func (o *OSRM) store(k [2]geo.LatLon, v osrmVal) {
 	o.mu.Lock()
 	o.makeRoom(1)
 	o.memo[k] = v
@@ -154,7 +188,7 @@ func (o *OSRM) makeRoom(n int) {
 		limit = 2_000_000
 	}
 	if o.memo == nil || len(o.memo)+n > limit {
-		o.memo = map[[2]geo.LatLon]cacheVal{}
+		o.memo = map[[2]geo.LatLon]osrmVal{}
 	}
 }
 
@@ -222,6 +256,7 @@ func (o *OSRM) route(a, b geo.LatLon, path bool) (float64, []geo.LatLon, error) 
 				Coordinates [][2]float64 `json:"coordinates"`
 			} `json:"geometry"`
 		} `json:"routes"`
+		Waypoints []waypoint `json:"waypoints"`
 	}
 	q := url.Values{"overview": {"false"}}
 	if path {
@@ -229,6 +264,11 @@ func (o *OSRM) route(a, b geo.LatLon, path bool) (float64, []geo.LatLon, error) 
 	}
 	if err := o.get("route", coords([]geo.LatLon{a, b}), q, &r); err != nil {
 		return 0, nil, err
+	}
+	for _, w := range r.Waypoints {
+		if w.Distance > o.maxSnap() {
+			return 0, nil, errOutside
+		}
 	}
 	if len(r.Routes) == 0 {
 		return 0, nil, errNoRoute
@@ -291,7 +331,9 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 		q.Set("destinations", idx(dstOff, len(dst)))
 	}
 	var r struct {
-		Durations [][]*float64 `json:"durations"`
+		Durations    [][]*float64 `json:"durations"`
+		Sources      []waypoint   `json:"sources"`
+		Destinations []waypoint   `json:"destinations"`
 	}
 	if err := o.get("table", coords(locs), q, &r); err != nil {
 		if errors.Is(err, errNoRoute) {
@@ -302,6 +344,9 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 	if len(r.Durations) != len(src) {
 		return fmt.Errorf("osrm table: %d rows for %d sources", len(r.Durations), len(src))
 	}
+	outside := func(ws []waypoint, i int) bool {
+		return i < len(ws) && ws[i].Distance > o.maxSnap()
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.makeRoom(len(src) * len(dst))
@@ -310,9 +355,12 @@ func (o *OSRM) table(src, dst []geo.LatLon, same bool) error {
 			return fmt.Errorf("osrm table: row of %d for %d destinations", len(row), len(dst))
 		}
 		for j, d := range row {
-			v := cacheVal{ok: d != nil}
+			v := osrmVal{ok: d != nil}
 			if d != nil {
 				v.s = *d
+			}
+			if outside(r.Sources, i) || outside(r.Destinations, j) {
+				v = osrmVal{outside: true}
 			}
 			o.memo[[2]geo.LatLon{src[i], dst[j]}] = v
 		}
@@ -339,7 +387,7 @@ func (o *OSRM) Steps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 		switch {
 		case err == nil && len(pts) > 0:
 			st.Path = append(append([]geo.LatLon{a}, pts...), b)
-		case err != nil && !errors.Is(err, errNoRoute):
+		case err != nil && !errors.Is(err, errNoRoute) && !errors.Is(err, errOutside):
 			o.fail(err)
 		}
 	}

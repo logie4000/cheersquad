@@ -168,13 +168,20 @@ straight-line estimates and the server logs it once.
 Footprint (rough, for the six preloaded cities): the build needs a few GB of
 free memory for a few minutes per profile (car is the smallest, foot the
 largest), and the finished data is about 1-2 GB on disk. The routers serve
-the files memory-mapped (`--mmap`). Each is capped at `OSRM_MEM_LIMIT` (2 GB
-by default), one CPU (`OSRM_CPUS`) and two request threads (`OSRM_THREADS`),
-so a busy router can't starve the other sites. The mapped files count toward
-the memory cap, so keep it above the biggest folder in `du -sh osrm/*`; a
-router squeezed below its data size keeps re-reading its files and burns
-CPU. Set a limit for one run and later runs keep it:
-`OSRM_MEM_LIMIT=3g deploy/scripts/deploy.sh`.
+the files memory-mapped (`--mmap`), so only the parts plans touch are read
+into memory (a plan touches only its own city); that memory is page cache,
+which the kernel can reclaim. Each router gets one CPU (`OSRM_CPUS`) and two
+request threads (`OSRM_THREADS`), so a busy one can't starve the other
+sites, and a memory limit that `deploy.sh` sizes from its data (its folder
+in `du -sh osrm/*` plus a quarter and 256 MB), so all of it can stay
+cached. `OSRM_MEM_LIMIT=3g deploy/scripts/deploy.sh` sets one limit for all
+of them instead; later runs keep it.
+
+All cities share one dataset per mode rather than one router per city:
+splitting wouldn't save memory while every city is served, and memory-mapped
+data that no plan touches costs nothing. To shrink a dataset, drop a city
+(delete `osrm/areas/<city>.osm.pbf` and run `build-osrm.sh` with any other
+city to rebuild) or clip tighter with `NAME=URL@WEST,SOUTH,EAST,NORTH`.
 
 ### Building somewhere else
 

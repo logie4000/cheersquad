@@ -50,6 +50,17 @@ for v in OSRM_MEM_LIMIT OSRM_CPUS OSRM_THREADS; do
   val=${!v:-$(sed -n "s/^$v=//p" .env.prev 2>/dev/null || true)}
   [ -z "$val" ] || echo "$v=$val" >> .env
 done
+# Each router's memory limit: OSRM_MEM_LIMIT for all of them if set,
+# otherwise its data size plus a quarter and 256 MB, so all of its
+# memory-mapped files can stay cached.
+mem_all=$(sed -n 's/^OSRM_MEM_LIMIT=//p' .env)
+for p in "${osrm_profiles[@]}"; do
+  name=${p#osrm-}
+  limit=$mem_all
+  [ -n "$limit" ] || limit="$(($(du -sm "osrm/$name" | cut -f1) * 5 / 4 + 256))m"
+  echo "OSRM_${name^^}_MEM_LIMIT=$limit" >> .env
+  echo "$p memory limit $limit"
+done
 rm -f .env.prev
 [ ${#osrm_profiles[@]} -eq 0 ] || echo "street routing: ${osrm_profiles[*]}"
 echo "deploying $COMPOSE_PROJECT_NAME-app:$IMAGE_TAG"
