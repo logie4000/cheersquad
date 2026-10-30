@@ -441,3 +441,30 @@ func TestPlanDriveUsesStreetRouter(t *testing.T) {
 		t.Fatalf("walk routing %q (%v)", resp.Routing, err)
 	}
 }
+
+func TestPlanAvoidFerriesUsesNoFerryRouter(t *testing.T) {
+	params := `{
+		"runner": {"finishSeconds": 3000},
+		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "drive", "avoidFerries": %s, "startTimeSeconds": -600},
+		"certifiedMeters": 10000,
+		"spacingMeters": 1000
+	}`
+	cfg := Config{Drive: &streetRouter{}, NoFerry: map[travel.Mode]travel.Provider{travel.Drive: noFerryRouter{}, travel.Walk: noFerryRouter{}}}
+	for avoid, want := range map[string]string{"false": "Driving: test streets", "true": "Driving: no ferries"} {
+		rec := requestWith(t, cfg, straightGPX, fmt.Sprintf(params, avoid))
+		var resp Response
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Routing != want {
+			t.Errorf("avoidFerries %s: routing %q (%v), want %q", avoid, resp.Routing, err, want)
+		}
+	}
+	// A mode with no usual router keeps the stub even when avoiding ferries.
+	rec := requestWith(t, cfg, straightGPX, strings.Replace(fmt.Sprintf(params, "true"), `"drive"`, `"walk"`, 1))
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Routing != "Walking: straight-line estimate" {
+		t.Errorf("walk without a walk router: routing %q (%v)", resp.Routing, err)
+	}
+}
+
+type noFerryRouter struct{ travel.Haversine }
+
+func (noFerryRouter) String() string { return "no ferries" }

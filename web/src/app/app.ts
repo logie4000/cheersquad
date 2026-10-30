@@ -93,6 +93,7 @@ export class App implements OnInit {
     spectatorStart: '06:45',
     mode: 'walk' as PlanForm['mode'],
     raceDay: 'sunday' as PlanForm['raceDay'],
+    avoidFerries: false,
     bufferMinutes: 3,
     maxStops: 0,
     lateFrom: this.fb.control<number | null>(null),

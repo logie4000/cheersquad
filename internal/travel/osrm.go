@@ -50,6 +50,11 @@ type OSRM struct {
 	// request has at most 2*ChunkSize locations. Zero means 50, which fits
 	// OSRM's default --max-table-size of 100.
 	ChunkSize int
+	// Exclude is a comma-separated list of road classes to avoid, sent with
+	// every request ("ferry"). The server's profile must make them
+	// excludable (deploy/osrm/excludable-ferry.lua); if it doesn't, requests
+	// go without it and the first refusal is logged.
+	Exclude string
 	// MaxSnap is how far in meters a point may be from the nearest street in
 	// OSRM's data. OSRM snaps any point to its nearest street, however far,
 	// so a point outside the area the data covers (another city) would get a
@@ -63,6 +68,8 @@ type OSRM struct {
 
 	// tables and routes count requests sent, for Requests.
 	tables, routes atomic.Int64
+	// noExclude is set once the server refuses Exclude.
+	noExclude atomic.Bool
 
 	mu        sync.Mutex
 	memo      map[[2]geo.LatLon]osrmVal
@@ -100,7 +107,13 @@ type waypoint struct {
 const osrmRetry = time.Minute
 
 func (o *OSRM) String() string {
-	return fmt.Sprintf("OSRM %s routing", o.profile())
+	switch o.Exclude {
+	case "":
+		return fmt.Sprintf("OSRM %s routing", o.profile())
+	case "ferry":
+		return fmt.Sprintf("OSRM %s routing without ferries", o.profile())
+	}
+	return fmt.Sprintf("OSRM %s routing avoiding %s", o.profile(), o.Exclude)
 }
 
 func (o *OSRM) mode() Mode {
@@ -214,6 +227,34 @@ func coords(ps []geo.LatLon) string {
 // get fetches an OSRM service URL and decodes the body into out. OSRM
 // answers NoRoute with a 400 and a JSON body, so the code field decides.
 func (o *OSRM) get(service, path string, q url.Values, out any) error {
+	if o.Exclude != "" && !o.noExclude.Load() {
+		err := o.send(service, path, withExclude(q, o.Exclude), out)
+		var bad errInvalid
+		if !errors.As(err, &bad) || !strings.Contains(bad.message, "xclude") {
+			return err
+		}
+		o.noExclude.Store(true)
+		log.Printf("osrm %s: server refused exclude=%s (%s); routing without it. Rebuild with deploy/scripts/build-osrm.sh to support it", o.profile(), o.Exclude, bad.message)
+	}
+	return o.send(service, path, q, out)
+}
+
+// errInvalid is OSRM refusing a request parameter.
+type errInvalid struct{ message string }
+
+func (e errInvalid) Error() string { return "osrm: invalid value: " + e.message }
+
+func withExclude(q url.Values, exclude string) url.Values {
+	c := url.Values{}
+	for k, v := range q {
+		c[k] = v
+	}
+	c.Set("exclude", exclude)
+	return c
+}
+
+// send makes one request; see get.
+func (o *OSRM) send(service, path string, q url.Values, out any) error {
 	if service == "table" {
 		o.tables.Add(1)
 	} else {
@@ -242,6 +283,8 @@ func (o *OSRM) get(service, path string, q url.Values, out any) error {
 		return json.Unmarshal(raw, out)
 	case "NoRoute":
 		return errNoRoute
+	case "InvalidValue":
+		return errInvalid{env.Message}
 	}
 	return fmt.Errorf("osrm %s: status %d code %q: %s", service, resp.StatusCode, env.Code, env.Message)
 }

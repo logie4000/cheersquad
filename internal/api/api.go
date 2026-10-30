@@ -98,6 +98,9 @@ type Spectator struct {
 	BufferSeconds *float64 `json:"bufferSeconds"`
 	// RaceDay picks the transit timetable; empty means Sunday.
 	RaceDay RaceDay `json:"raceDay"`
+	// AvoidFerries routes walking, biking and driving without ferries, where
+	// the router supports it (Config.NoFerry).
+	AvoidFerries bool `json:"avoidFerries"`
 }
 
 // RaceDay is the kind of day a race is run on, which decides the transit
@@ -179,6 +182,10 @@ type Config struct {
 	// bicycle and car profiles). Nil means the straight-line stub. Like
 	// Walk, a Prefetcher is warmed before solving.
 	Bike, Drive travel.Provider
+	// NoFerry are the routers for Walk, Bike and Drive with ferries left out,
+	// used when the spectator asks to avoid ferries. A mode with none uses
+	// its usual router.
+	NoFerry map[travel.Mode]travel.Provider
 	// Races are the preloaded courses; nil means the embedded ones.
 	Races *races.Catalog
 }
@@ -319,7 +326,7 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		return nil, fmt.Errorf("too many candidate spots (%d, max %d); increase spacing or pin fewer spots", len(nodes), MaxCandidates)
 	}
 
-	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
+	rt := chooseRouting(cfg, mode, day, p.Spectator.AvoidFerries, p.Spectator.Start, track.Points)
 	began := time.Now()
 	counter, _ := rt.walk.(requestCounter)
 	var tables0, routes0 int64
@@ -487,8 +494,27 @@ func router(p travel.Provider) (travel.Provider, string) {
 	return p, "routed"
 }
 
-func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, course []geo.LatLon) routing {
+func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, noFerry bool, start geo.LatLon, course []geo.LatLon) routing {
 	stub := travel.Haversine{}
+	if noFerry {
+		// Swap in the ferry-free routers where there are any.
+		for m, p := range cfg.NoFerry {
+			switch m {
+			case travel.Walk:
+				if cfg.Walk != nil {
+					cfg.Walk = p
+				}
+			case travel.Bike:
+				if cfg.Bike != nil {
+					cfg.Bike = p
+				}
+			case travel.Drive:
+				if cfg.Drive != nil {
+					cfg.Drive = p
+				}
+			}
+		}
+	}
 	walk, walkName := router(cfg.Walk)
 	switch mode {
 	case travel.Walk:

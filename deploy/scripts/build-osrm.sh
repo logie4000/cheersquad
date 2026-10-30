@@ -35,6 +35,7 @@ image="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:v5.27.1}"
 osmium_image="${OSMIUM_IMAGE:-debian:bookworm-slim}"
 profiles="${OSRM_PROFILES:-foot bicycle car}"
 geofabrik=https://download.geofabrik.de
+profiles_dir="$(cd "$(dirname "$0")/../osrm" && pwd)"
 all=(berlin boston chicago london nyc tokyo)
 
 usage() {
@@ -119,8 +120,13 @@ for p in $profiles; do
   mkdir -p "$work"
   ln "$dir/area.osm.pbf" "$work/area.osm.pbf" 2>/dev/null || cp "$dir/area.osm.pbf" "$work/area.osm.pbf"
   echo "building the $p profile"
-  docker run --rm --user "$(id -u):$(id -g)" -v "$work:/data" "$image" sh -ec "
-    osrm-extract -p /opt/$p.lua /data/area.osm.pbf
+  # Foot and bicycle go through a wrapper that lets plans leave ferries out
+  # (the stock car profile already can).
+  lua=/opt/$p.lua
+  [ "$p" = car ] || lua=/profiles/excludable-ferry.lua
+  docker run --rm --user "$(id -u):$(id -g)" -e OSRM_BASE_PROFILE="$p" \
+    -v "$profiles_dir:/profiles:ro" -v "$work:/data" "$image" sh -ec "
+    osrm-extract -p $lua /data/area.osm.pbf
     osrm-partition /data/area.osrm
     osrm-customize /data/area.osrm
   "
