@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -98,9 +97,6 @@ type Spectator struct {
 	BufferSeconds *float64 `json:"bufferSeconds"`
 	// RaceDay picks the transit timetable; empty means Sunday.
 	RaceDay RaceDay `json:"raceDay"`
-	// AvoidFerries routes walking, biking and driving without ferries, where
-	// the router supports it (Config.NoFerry).
-	AvoidFerries bool `json:"avoidFerries"`
 }
 
 // RaceDay is the kind of day a race is run on, which decides the transit
@@ -181,14 +177,6 @@ type Config struct {
 	// Nil means the straight-line stub. If it is a travel.Prefetcher it is
 	// warmed with every point a plan may ask about before solving.
 	Walk travel.Provider
-	// Bike and Drive time bike and drive mode legs over streets (OSRM's
-	// bicycle and car profiles). Nil means the straight-line stub. Like
-	// Walk, a Prefetcher is warmed before solving.
-	Bike, Drive travel.Provider
-	// NoFerry are the routers for Walk, Bike and Drive with ferries left out,
-	// used when the spectator asks to avoid ferries. A mode with none uses
-	// its usual router.
-	NoFerry map[travel.Mode]travel.Provider
 	// Races are the preloaded courses; nil means the embedded ones.
 	Races *races.Catalog
 }
@@ -329,14 +317,7 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		return nil, fmt.Errorf("too many candidate spots (%d, max %d); increase spacing or pin fewer spots", len(nodes), MaxCandidates)
 	}
 
-	rt := chooseRouting(cfg, mode, day, p.Spectator.AvoidFerries, p.Spectator.Start, track.Points)
-	began := time.Now()
-	counter, _ := rt.walk.(requestCounter)
-	var tables0, routes0 int64
-	if counter != nil {
-		tables0, routes0 = counter.Requests()
-	}
-	prefetched := 0
+	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
 		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
@@ -356,7 +337,6 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		pts = append(pts, p.Crossings...)
 		if len(pts) <= MaxPrefetchPoints {
 			pf.Prefetch(pts)
-			prefetched = len(pts)
 		}
 	}
 	provider = &travel.Cached{Inner: provider}
@@ -379,19 +359,6 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 			StopPenalty: p.StopPenalty,
 		},
 	)
-	defer func() {
-		// One line per plan, so a CPU spike can be traced to plan sizes and
-		// routing requests. The counts are server-wide over the plan's run.
-		msg := fmt.Sprintf("plan: mode %s, %d candidates, %d crossings, %d stops, %s", mode, len(nodes), len(p.Crossings), len(plan.Stops), time.Since(began).Round(time.Millisecond))
-		if counter != nil {
-			tables, routes := counter.Requests()
-			msg += fmt.Sprintf(", %d points prefetched, osrm %d table + %d route requests", prefetched, tables-tables0, routes-routes0)
-		}
-		if ctx.Err() != nil {
-			msg += ", timed out"
-		}
-		log.Print(msg)
-	}()
 	if ctx.Err() != nil {
 		return nil, errors.New("planning took too long; try wider spacing or fewer crossings")
 	}
@@ -490,67 +457,28 @@ func thin(pts []geo.LatLon, max int) []geo.LatLon {
 	return append(out, pts[len(pts)-1])
 }
 
-// requestCounter is a routing client that counts its requests
-// (travel.OSRM).
-type requestCounter interface {
-	Requests() (tables, routes int64)
-}
-
 // routing is the travel setup chosen for one request.
 type routing struct {
-	// walk is the base provider before closures: the configured router for
-	// the mode (the walker for walk and transit), or the straight-line stub.
+	// walk is the base provider before closures: the configured walker for
+	// walk and transit modes, the straight-line stub otherwise.
 	walk  travel.Provider
 	net   travel.Network // nil unless transit runs on a subway
 	label string
 }
 
-// router returns p, or the straight-line stub if p is nil, and its name.
-func router(p travel.Provider) (travel.Provider, string) {
-	if p == nil {
-		return travel.Haversine{}, "straight-line estimate"
-	}
-	if s, ok := p.(fmt.Stringer); ok {
-		return p, s.String()
-	}
-	return p, "routed"
-}
-
-func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, noFerry bool, start geo.LatLon, course []geo.LatLon) routing {
+func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, course []geo.LatLon) routing {
 	stub := travel.Haversine{}
-	if noFerry {
-		// Swap in the ferry-free routers where there are any.
-		for m, p := range cfg.NoFerry {
-			switch m {
-			case travel.Walk:
-				if cfg.Walk != nil {
-					cfg.Walk = p
-				}
-			case travel.Bike:
-				if cfg.Bike != nil {
-					cfg.Bike = p
-				}
-			case travel.Drive:
-				if cfg.Drive != nil {
-					cfg.Drive = p
-				}
-			}
-		}
+	walk, walkName := cfg.Walk, "straight-line estimate"
+	if walk == nil {
+		walk = stub
+	} else if s, ok := walk.(fmt.Stringer); ok {
+		walkName = s.String()
+	} else {
+		walkName = "routed"
 	}
-	walk, walkName := router(cfg.Walk)
 	switch mode {
 	case travel.Walk:
 		return routing{walk: walk, label: "Walking: " + walkName}
-	case travel.Bike:
-		if cfg.Bike != nil {
-			bike, name := router(cfg.Bike)
-			return routing{walk: bike, label: "Biking: " + name}
-		}
-	case travel.Drive:
-		if cfg.Drive != nil {
-			drive, name := router(cfg.Drive)
-			return routing{walk: drive, label: "Driving: " + name}
-		}
 	case travel.Transit:
 		nets, schedule := cfg.DayNetworks[day], day
 		if len(nets) == 0 {

@@ -93,7 +93,6 @@ export class App implements OnInit {
     spectatorStart: '06:45',
     mode: 'walk' as PlanForm['mode'],
     raceDay: 'sunday' as PlanForm['raceDay'],
-    avoidFerries: false,
     bufferMinutes: 3,
     maxStops: 0,
     lateFrom: this.fb.control<number | null>(null),
@@ -315,7 +314,7 @@ export class App implements OnInit {
         steps: legs[i],
       })),
       note:
-        "Leave times assume the runner is at the slow end of their window, so you can go sooner once you've seen them." +
+        'Leave each spot as soon as your runner goes by. Times shown are for a runner on pace; each hop leaves enough time even if they run faster than expected.' +
         (r.routing ? '' : ' Travel times are straight-line estimates for now, not real routes.'),
       map: {
         course: this.course(),
