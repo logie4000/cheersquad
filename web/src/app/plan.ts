@@ -139,10 +139,12 @@ export function parseClock(s: string): number {
 
 /** Formats seconds since the gun as a clock time, given the gun's clock time. */
 export function formatClock(sinceGun: number, gunClock: number): string {
-  const day = 24 * 3600;
-  const t = (((Math.round(sinceGun + gunClock) % day) + day) % day) / 60;
+  // Round to whole minutes before splitting into hours and minutes, so
+  // 7:59:45 shows as 8:00 rather than 7:60.
+  const day = 24 * 60;
+  const t = ((Math.round((sinceGun + gunClock) / 60) % day) + day) % day;
   const h = Math.floor(t / 60);
-  const m = Math.round(t % 60);
+  const m = t % 60;
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
