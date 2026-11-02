@@ -6,11 +6,25 @@
 // a plan whose last stop is k:
 //
 //	best[k] = w[k] + max over feasible j->k of best[j]   (j may be the start)
-//	feasible(j, k): t_slow[j] + travel(j, k) + buffer <= t_fast[k]
+//	feasible(start, k): start.Time + travel(start, k) + buffer <= t_fast[k]
+//	feasible(j, k):     t_fast[j] + travel(j, k) + buffer <= t_fast[k]
 //
-// The spectator leaves a spot only once the runner's latest pass time has
-// gone by, and must arrive buffer seconds before the earliest pass time at
-// the next one.
+// The spectator leaves a spot as soon as the runner goes by, and the
+// runner's pass times are not independent: if they are late at j they will
+// be late at k too. Leaving at whatever time the runner actually passes j,
+// the spectator has the j->k stretch at the runner's fastest plausible pace
+// to get to k, which is t_fast[k] - t_fast[j]. Requiring the spectator to
+// wait until j's latest pass time and still beat k's earliest one (an older
+// rule) counted the uncertainty twice, and since the window grows with
+// distance it ruled out every late-race hop (NYC: no transit stop after
+// mile 20 for a 4:00 runner).
+//
+// Times in the returned plan are for a runner on their expected pace.
+//
+// Pinned nodes are must-visit spots: each carries a bonus larger than the
+// value of every unpinned node put together, so the plan includes as many
+// pinned sightings as can be reached and only then maximizes value. The
+// bonus is not counted in the plan's reported value.
 package planner
 
 import (
@@ -48,13 +62,16 @@ type Params struct {
 // Stop is one leg plus the sighting at its end.
 type Stop struct {
 	Node candidates.Node `json:"node"`
-	// Depart is when the spectator leaves the previous stop (or start).
+	// Depart is when the spectator leaves the previous stop (or start):
+	// the start time, or the runner's expected pass time at the previous
+	// stop. The spectator leaves as soon as the runner has gone by.
 	Depart float64 `json:"depart"`
 	// Travel is the leg duration in seconds.
 	Travel float64 `json:"travel"`
 	// Arrive is Depart + Travel.
 	Arrive float64 `json:"arrive"`
-	// Wait is the expected wait from arrival to the expected pass time.
+	// Wait is the expected wait from arrival to the expected pass time,
+	// for a runner on their expected pace.
 	Wait float64 `json:"wait"`
 }
 
@@ -99,12 +116,19 @@ func Solve(start Start, nodes []candidates.Node, travel TravelFunc, p Params) Pl
 		fromStart[k] = leg(start.Pos, start.Time, k)
 		legs[k] = make([]float64, k)
 		for j := 0; j < k; j++ {
-			legs[k][j] = leg(ns[j].Pos, ns[j].TSlow, k)
+			legs[k][j] = leg(ns[j].Pos, ns[j].TFast, k)
 		}
 	}
 	w := make([]float64, n)
+	bonus := 1.0
 	for k := range ns {
 		w[k] = ns[k].Weight - p.StopPenalty
+		bonus += math.Abs(w[k])
+	}
+	for k := range ns {
+		if ns[k].Pinned {
+			w[k] += bonus
+		}
 	}
 
 	layers := p.MaxStops
@@ -166,13 +190,14 @@ func Solve(start Start, nodes []candidates.Node, travel TravelFunc, p Params) Pl
 			m--
 		}
 	}
-	plan := Plan{Value: bv, Sightings: len(chain)}
+	plan := Plan{Sightings: len(chain)}
 	for i := len(chain) - 1; i >= 0; i-- {
 		k := chain[i]
+		plan.Value += ns[k].Weight - p.StopPenalty
 		st := Stop{Node: ns[k], Depart: start.Time, Travel: fromStart[k]}
 		if i < len(chain)-1 {
 			j := chain[i+1]
-			st.Depart, st.Travel = ns[j].TSlow, legs[k][j]
+			st.Depart, st.Travel = ns[j].TExpected, legs[k][j]
 		}
 		st.Arrive = st.Depart + st.Travel
 		st.Wait = ns[k].TExpected - st.Arrive

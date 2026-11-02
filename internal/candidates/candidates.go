@@ -40,6 +40,10 @@ type Area struct {
 	Radius float64    `json:"radius"`
 }
 
+// DefaultSnapRadius is how far, in meters, a pinned location may be from the
+// course by default.
+const DefaultSnapRadius = 100.0
+
 // Options controls candidate generation. Zero values get defaults.
 type Options struct {
 	// Spacing between generated spots in meters. Default 300.
@@ -47,7 +51,7 @@ type Options struct {
 	// Pinned locations are snapped to the course and added, once per pass.
 	Pinned []geo.LatLon
 	// SnapRadius is how far a pinned location may be from the course.
-	// Default 100 m.
+	// Default DefaultSnapRadius.
 	SnapRadius float64
 	// Excluded areas drop any spot inside them, pinned or generated.
 	Excluded []Area
@@ -61,7 +65,7 @@ func Generate(t *gpx.Track, p pace.Profile, o Options) []Node {
 		o.Spacing = 300
 	}
 	if o.SnapRadius <= 0 {
-		o.SnapRadius = 100
+		o.SnapRadius = DefaultSnapRadius
 	}
 	var dists []float64
 	for d := 0.0; d < t.Length(); d += o.Spacing {

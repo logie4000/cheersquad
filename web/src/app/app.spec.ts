@@ -197,6 +197,21 @@ describe('App', () => {
     expect(el.querySelector('.routing')?.textContent).toContain('MTA');
   });
 
+  it('marks pinned stops and says how many pins were missed', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.componentInstance.result.set({
+      ...base,
+      plan: { ...base.plan, stops: [{ ...stop, node: { ...stop.node, pinned: true } }] },
+      missedPins: [{ lat: 1, lon: 1 }],
+    });
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('td .pinned')).not.toBeNull();
+    expect(el.querySelector('.missed-pins')?.textContent).toContain(
+      '1 pinned spot is not in the plan',
+    );
+  });
+
   it('renders plans from servers that send no legs', () => {
     const fixture = TestBed.createComponent(App);
     fixture.componentInstance.result.set(base);

@@ -154,7 +154,7 @@ func TestMatchesBruteForce(t *testing.T) {
 			if !ok || prevT+d+params.Buffer > s.Node.TFast+1e-9 {
 				t.Fatalf("iter %d: infeasible leg into node %d", iter, s.Node.ID)
 			}
-			prevPos, prevT = s.Node.Pos, s.Node.TSlow
+			prevPos, prevT = s.Node.Pos, s.Node.TFast
 		}
 	}
 }
@@ -175,7 +175,7 @@ func bruteForce(start Start, nodes []candidates.Node, tf TravelFunc, p Params) f
 			}
 			d, ok := tf(pos, nd.Pos)
 			if ok && t+d+p.Buffer <= nd.TFast {
-				rec(nd.Pos, nd.TSlow, used|1<<i, stops+1, val+nd.Weight-p.StopPenalty)
+				rec(nd.Pos, nd.TFast, used|1<<i, stops+1, val+nd.Weight-p.StopPenalty)
 			}
 		}
 	}
@@ -193,4 +193,111 @@ func equal(a, b []float64) bool {
 		}
 	}
 	return true
+}
+
+// pinnedNodes is straightNodes plus a pinned spot at pin meters.
+func pinnedNodes(t *testing.T, pin float64) []candidates.Node {
+	t.Helper()
+	tr, err := gpx.New([]geo.LatLon{{}, {Lat: 10000 / degLat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.Calibrate(10000)
+	p := pace.Profile{Distance: 10000, Finish: 3000}
+	return candidates.Generate(tr, p, candidates.Options{Spacing: 1000, Pinned: []geo.LatLon{tr.PointAt(pin)}})
+}
+
+func TestPinnedSpotIsVisited(t *testing.T) {
+	// Unpinned, the cyclist sees every even kilometer. A pin at 3.5 km is
+	// off that rhythm, so the plan shifts: 2, 3.5, 5, 7, 9 km (each hop at
+	// least 1250 m). Its value counts only real weights, not the pin bonus.
+	pl := Solve(Start{}, pinnedNodes(t, 3500), speed(10), Params{Buffer: 250})
+	found := false
+	for _, s := range pl.Stops {
+		if s.Node.Pinned {
+			found = true
+			if math.Abs(s.Node.Dist-3500) > 10 {
+				t.Fatalf("pinned stop at %f, want 3500", s.Node.Dist)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("pinned spot not in plan: %v", dists(pl))
+	}
+	if pl.Value != float64(pl.Sightings) {
+		t.Fatalf("value %f includes the pin bonus (sightings %d)", pl.Value, pl.Sightings)
+	}
+	if got, want := dists(pl), []float64{2000, 3500, 5000, 7000, 9000}; !equal(got, want) {
+		t.Fatalf("stops %v, want %v", got, want)
+	}
+}
+
+func TestUnreachablePinIsSkipped(t *testing.T) {
+	// Walking at 1 m/s from the start line, a pin at 5.5 km can never be
+	// reached, so the plan is unchanged.
+	pl := Solve(Start{}, pinnedNodes(t, 5500), speed(1), Params{})
+	if got := dists(pl); !equal(got, []float64{0}) {
+		t.Fatalf("stops %v, want [0]", got)
+	}
+}
+
+func TestPinnedBeatsMoreSightings(t *testing.T) {
+	// With one stop allowed, the pin wins over every other spot.
+	pl := Solve(Start{}, pinnedNodes(t, 8500), speed(10), Params{Buffer: 250, MaxStops: 1})
+	if got := dists(pl); !equal(got, []float64{8500}) {
+		t.Fatalf("stops %v, want [8500]", got)
+	}
+}
+
+func TestLeaveWhenRunnerPasses(t *testing.T) {
+	// 10% uncertainty on a 50 min 10 km: spots at 6 km (pass 27-33 min) and
+	// 9 km (40.5-49.5 min). A cyclist at 10 m/s takes 300 s for the 3 km
+	// hop, plus a 250 s buffer. Leaving when the runner passes 6 km, they
+	// have the 3 km at the fastest pace (810 s) to get ahead, so the hop
+	// works. Waiting for the slow end at 6 km (1980 s) and still beating the
+	// fast end at 9 km (2430 s) would not leave enough time.
+	nodes := []candidates.Node{
+		{ID: 0, Pos: geo.LatLon{Lat: 6000 / degLat}, Dist: 6000, TFast: 1620, TExpected: 1800, TSlow: 1980, Weight: 1},
+		{ID: 1, Pos: geo.LatLon{Lat: 9000 / degLat}, Dist: 9000, TFast: 2430, TExpected: 2700, TSlow: 2970, Weight: 1},
+	}
+	start := Start{Pos: nodes[0].Pos}
+	pl := Solve(start, nodes, speed(10), Params{Buffer: 250})
+	if got := dists(pl); !equal(got, []float64{6000, 9000}) {
+		t.Fatalf("stops %v, want [6000 9000]", got)
+	}
+	// Times are for a runner on pace: leave 6 km at 1800, arrive 2100, and
+	// the runner is due at 2700.
+	s := pl.Stops[1]
+	if math.Abs(s.Depart-1800) > 1e-6 || math.Abs(s.Travel-300) > 1e-6 || math.Abs(s.Arrive-2100) > 1e-6 || math.Abs(s.Wait-600) > 1e-6 {
+		t.Fatalf("second stop depart %f travel %f arrive %f wait %f", s.Depart, s.Travel, s.Arrive, s.Wait)
+	}
+	// A bigger hop than the fast stretch allows still fails: with a 600 s
+	// buffer, 300 + 600 > 810.
+	pl = Solve(start, nodes, speed(10), Params{Buffer: 600})
+	if pl.Sightings != 1 {
+		t.Fatalf("got %d sightings with a 600 s buffer, want 1", pl.Sightings)
+	}
+}
+
+func TestLateRaceHopsWithUncertainty(t *testing.T) {
+	// A straight 40 km at 0.3 s/m with 5% uncertainty and spots every km.
+	// A 10 m/s cyclist gains 0.185 s/m on the runner's fastest pace, so any
+	// hop of at least 1352 m clears the 250 s buffer, all the way to the
+	// finish. The pass windows grow with distance (+/-9 min at 36 km); if
+	// the spectator had to outlast one end and beat the other, hops late
+	// in the race would need 7 km or more and the plan would stall.
+	tr, err := gpx.New([]geo.LatLon{{}, {Lat: 40000 / degLat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.Calibrate(40000)
+	p := pace.Profile{Distance: 40000, Finish: 12000, Uncertainty: 0.05}
+	nodes := candidates.Generate(tr, p, candidates.Options{Spacing: 1000})
+	pl := Solve(Start{}, nodes, speed(10), Params{Buffer: 250})
+	if pl.Sightings < 20 {
+		t.Fatalf("only %d sightings: %v", pl.Sightings, dists(pl))
+	}
+	if last := pl.Stops[len(pl.Stops)-1].Node.Dist; last != 40000 {
+		t.Fatalf("plan ends at %.0f m, want the finish: %v", last, dists(pl))
+	}
 }

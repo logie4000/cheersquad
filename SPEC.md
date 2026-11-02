@@ -37,8 +37,11 @@ Sort nodes by `t_fast`. `best[k]` is the max total value of a plan whose last st
 
 ```
 best[k] = w[k] + max(0, max over feasible j->k of best[j])
-feasible(j, k): t_slow[j] + travel(j, k) + buffer <= t_fast[k]
+feasible(start, k): start_time + travel(start, k) + buffer <= t_fast[k]
+feasible(j, k): t_fast[j] + travel(j, k) + buffer <= t_fast[k]
 ```
+
+The spectator leaves j as soon as the runner passes, whenever that is, and a runner who is late at j is late at k too. So the time available for j->k is the stretch between them at the runner's fastest plausible pace, t_fast[k] - t_fast[j]. (An earlier rule, t_slow[j] + travel + buffer <= t_fast[k], counted the uncertainty at both ends; since the window widens with distance it ruled out late-race hops.) Reported leave/arrive/wait times are for a runner on expected pace.
 
 - Include a virtual start node (spectator's start place and time).
 - Answer is argmax over `best`; follow `parent` pointers to recover the route.

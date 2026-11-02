@@ -58,6 +58,12 @@ describe('time parsing', () => {
     expect(formatClock(0, parseClock('07:00'))).toBe('7:00 AM');
     expect(formatClock(-1800, parseClock('07:00'))).toBe('6:30 AM');
     expect(formatClock(6 * 3600, parseClock('07:00'))).toBe('1:00 PM');
+    // Seconds that round up to the next minute roll over the hour.
+    expect(formatClock(3600 - 15, parseClock('07:00'))).toBe('8:00 AM');
+    expect(formatClock(3600 - 31, parseClock('07:00'))).toBe('7:59 AM');
+    expect(formatClock(5 * 3600 - 10, parseClock('07:00'))).toBe('12:00 PM');
+    expect(formatClock(-10, parseClock('00:00'))).toBe('12:00 AM');
+    expect(formatClock(-40, parseClock('00:00'))).toBe('11:59 PM');
     expect(formatMinutes(3900)).toBe('1h 05m');
     expect(formatMinutes(720)).toBe('12m');
   });
