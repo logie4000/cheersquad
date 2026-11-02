@@ -163,10 +163,20 @@ type Response struct {
 	// MissedPins are the pinned spots the plan does not visit, because
 	// they are too far from the course or cannot be reached in time.
 	MissedPins []geo.LatLon `json:"missedPins"`
+	// Finish is when the runner is expected to finish (fastest, expected
+	// and slowest, as for each stop's runner times). It is not a sighting.
+	Finish PassTimes `json:"finish"`
 	// NoTransit, set only when transit was asked for, says that no subway
 	// or rail network covers the course or the spectator's start, so the
 	// plan walks between spots instead (Mode is then walk).
 	NoTransit string `json:"noTransit,omitempty"`
+}
+
+// PassTimes are when the runner reaches a point, in seconds since the gun.
+type PassTimes struct {
+	Fast     float64 `json:"tFast"`
+	Expected float64 `json:"tExpected"`
+	Slow     float64 `json:"tSlow"`
 }
 
 // Config is what the server knows beyond a single request.
@@ -389,7 +399,12 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		Routing:    rt.label,
 		Legs:       legs,
 		MissedPins: missedPins(p.Pinned, plan.Stops),
-		NoTransit:  rt.noTransit,
+		Finish: PassTimes{
+			Fast:     profile.Fast(profile.Distance),
+			Expected: profile.Expected(profile.Distance),
+			Slow:     profile.Slow(profile.Distance),
+		},
+		NoTransit: rt.noTransit,
 	}, nil
 }
 

@@ -256,6 +256,26 @@ describe('App', () => {
     expect(el.querySelector('.exports')).not.toBeNull();
   });
 
+  it("adds the runner's expected finish as a last row, on screen and in the PDF", async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.result.set({ ...base, finish: { tFast: 13000, tExpected: 14400, tSlow: 15800 } });
+    fixture.detectChanges();
+    const rows = (fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr');
+    const last = rows[rows.length - 1];
+    expect(last.classList).toContain('finish');
+    expect(last.textContent?.replace(/\s+/g, ' ')).toContain('26.2');
+    expect(last.textContent).toContain('Expected finish (not a sighting)');
+    expect(app.pdfPlan()?.finish).toEqual([
+      'Finish',
+      '26.2',
+      'Expected finish (not a sighting)',
+      '',
+      `${app.clock(14400)} (${app.clock(13000)}–${app.clock(15800)})`,
+      '',
+    ]);
+  });
+
   describe('distance units', () => {
     beforeEach(() => {
       try {

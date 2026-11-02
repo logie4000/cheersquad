@@ -83,6 +83,9 @@ func TestPlanEndToEnd(t *testing.T) {
 	if resp.Routing != "Straight-line estimate" || len(resp.Legs) != len(resp.Plan.Stops) {
 		t.Fatalf("routing %q, %d legs for %d stops", resp.Routing, len(resp.Legs), len(resp.Plan.Stops))
 	}
+	if f := resp.Finish; math.Abs(f.Expected-3000) > 1e-6 || f.Fast > f.Expected || f.Slow < f.Expected {
+		t.Fatalf("finish %+v, want 3000 s expected between fast and slow", f)
+	}
 	if resp.Plan.Sightings < 2 {
 		t.Fatalf("a driver (about 4.2 m/s door to door) should leapfrog the runner, got %d sightings", resp.Plan.Sightings)
 	}

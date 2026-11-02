@@ -300,7 +300,9 @@ export class App implements OnInit {
     return {
       summary: this.planSummary(),
       heading: `${n} sighting${n === 1 ? '' : 's'}`,
-      routing: r.routing ? `Routing: ${r.routing}` : undefined,
+      routing:
+        [r.routing ? `Routing: ${r.routing}.` : '', r.noTransit ?? ''].join(' ').trim() ||
+        undefined,
       columns: [
         '#',
         this.unit() === 'km' ? 'Km' : 'Mile',
@@ -321,6 +323,14 @@ export class App implements OnInit {
         link: this.mapsLink(s.node.pos),
         steps: legs[i],
       })),
+      finish: r.finish && [
+        'Finish',
+        this.distance(r.course.length),
+        'Expected finish (not a sighting)',
+        '',
+        `${this.clock(r.finish.tExpected)} (${this.clock(r.finish.tFast)}–${this.clock(r.finish.tSlow)})`,
+        '',
+      ],
       note:
         'Leave each spot as soon as your runner goes by. Times shown are for a runner on pace; each hop leaves enough time even if they run faster than expected.' +
         (r.routing ? '' : ' Travel times are straight-line estimates for now, not real routes.'),

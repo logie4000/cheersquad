@@ -90,6 +90,8 @@ export interface PlanResponse {
   missedPins?: LatLon[];
   /** Set when transit was asked for but no subway or rail data covers the course, so the plan walks. */
   noTransit?: string;
+  /** When the runner should finish, in seconds since the gun. Not a sighting. */
+  finish?: { tFast: number; tExpected: number; tSlow: number };
 }
 
 /** A preloaded race course from GET api/races. */
