@@ -31,6 +31,7 @@
 #   minneapolis   Metro Transit (Blue and Green light rail lines)
 #   paris    Ile-de-France Mobilites (metro, RER, trams; about 145 MB)
 #   rome     Roma Mobilita (metro A, B, C and trams)
+#   la       LA Metro Rail (B and D subway, A, C, E and K light rail)
 #   sf       BART and Muni (Muni Metro), saved as sf/bart.zip and
 #            sf/muni.zip; a folder of zips loads as one network
 #   sydney   Sydney Trains, Metro and light rail, saved in sydney/; needs a
@@ -42,7 +43,7 @@ set -euo pipefail
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"
 
 usage() {
-  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -96,6 +97,7 @@ for arg in "$@"; do
     minneapolis) fetch minneapolis https://svc.metrotransit.org/mtgtfs/gtfs.zip || status=1 ;;
     paris) fetch paris https://eu.ftp.opendatasoft.com/stif/GTFS/IDFM-gtfs.zip || status=1 ;;
     rome) fetch rome https://romamobilita.it/sites/default/files/rome_static_gtfs.zip || status=1 ;;
+    la) fetch la https://gitlab.com/LACMTA/gtfs_rail/-/raw/master/gtfs_rail.zip || status=1 ;;
     sf)
       fetch sf/bart https://www.bart.gov/dev/schedules/google_transit.zip || status=1
       fetch sf/muni https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip || status=1
@@ -158,7 +160,7 @@ for arg in "$@"; do
       fetch "${host//[^A-Za-z0-9_-]/_}" "$arg" || status=1
       ;;
     *)
-      echo "unknown feed '$arg'; known: nyc boston chicago dc london philadelphia minneapolis paris rome sf sydney, or NAME=URL" >&2
+      echo "unknown feed '$arg'; known: nyc boston chicago dc london philadelphia minneapolis paris rome la sf sydney, or NAME=URL" >&2
       status=1
       ;;
   esac

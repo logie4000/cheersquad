@@ -123,7 +123,8 @@ docker run --rm -v "${PWD}/gtfs:/gtfs" -v "${PWD}/deploy/scripts:/scripts:ro" `
 ```
 
 Also built in: `philadelphia` (SEPTA), `minneapolis` (Metro Transit),
-`paris` (Ile-de-France Mobilites, about 145 MB), `rome` (Roma Mobilita), `sf`
+`paris` (Ile-de-France Mobilites, about 145 MB), `rome` (Roma Mobilita), `la`
+(LA Metro Rail), `sf`
 and `sydney`. A city whose agencies publish separately gets a folder of
 zips, which the server merges into one network with walking transfers
 between them: `sf/` holds BART and Muni, `sydney/` holds Sydney Trains,
