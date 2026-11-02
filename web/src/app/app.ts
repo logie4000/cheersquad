@@ -189,9 +189,14 @@ export class App implements OnInit {
     });
   }
 
-  /** Shared by uploads and preloaded races: sets the file and draws its course. */
+  /**
+   * Shared by uploads and preloaded races: sets the file and draws its course.
+   * A new course drops the start point, pins, exclusions, crossings and the
+   * old plan, which all belong to the previous map.
+   */
   async loadCourse(file: File | null): Promise<void> {
     this.gpxFile.set(file);
+    this.marks.set({ start: null, pinned: [], excluded: [], crossings: [] });
     this.result.set(null);
     this.error.set(null);
     if (!file) {

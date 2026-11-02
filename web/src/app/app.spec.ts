@@ -38,6 +38,19 @@ describe('App', () => {
     expect(app.marks().start).toEqual({ lat: 1, lon: 1 });
   });
 
+  it('clears the start point, pins and old plan when the course changes', async () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    for (const mode of ['start', 'pin', 'exclude', 'crossing'] as const) {
+      app.clickMode.set(mode);
+      app.onMapClick({ lat: 1, lon: 1 });
+    }
+    app.result.set({ plan: { stops: [] } } as unknown as PlanResponse);
+    await app.loadCourse(new File([GPX], 'next.gpx'));
+    expect(app.marks()).toEqual({ start: null, pinned: [], excluded: [], crossings: [] });
+    expect(app.result()).toBeNull();
+    expect(app.course().length).toBe(2);
+  });
+
   it('asks for a GPX file before planning', () => {
     const app = TestBed.createComponent(App).componentInstance;
     app.submit();
