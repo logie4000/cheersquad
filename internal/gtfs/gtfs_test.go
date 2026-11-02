@@ -631,3 +631,68 @@ WKD,1,1,1,1,1,0,0,20260101,20261231
 		}
 	}
 }
+
+// otherFeed is a second agency's feed for merging with the fixture. Its
+// ids collide with the fixture's, and its station A is 85 m from F.
+var otherFeed = map[string]string{
+	"agency.txt": "agency_name,agency_url,agency_timezone\nOther Rail,https://example.org,America/New_York\n",
+	"routes.txt": "route_id,route_short_name,route_type\nR,O,1\n",
+	"stops.txt": `stop_id,stop_name,stop_lat,stop_lon
+A,Other Alpha,40.0,-73.959
+B,Other Bravo,40.0,-73.94
+`,
+	"calendar.txt": `service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+SUN,0,0,0,0,0,0,1,20260101,20261231
+`,
+	"trips.txt": "route_id,service_id,trip_id\nR,SUN,R_E1\nR,SUN,R_E2\nR,SUN,R_E3\n",
+	"stop_times.txt": `trip_id,arrival_time,departure_time,stop_id,stop_sequence
+R_E1,08:00:00,08:00:00,A,1
+R_E1,08:02:00,08:02:00,B,2
+R_E2,08:10:00,08:10:00,A,1
+R_E2,08:12:00,08:12:00,B,2
+R_E3,08:20:00,08:20:00,A,1
+R_E3,08:22:00,08:22:00,B,2
+`,
+}
+
+// Several feed zips in one directory, or in one zip, load as one network
+// with transfers between them.
+func TestMergedFeeds(t *testing.T) {
+	city := filepath.Join(t.TempDir(), "city")
+	if err := os.Mkdir(city, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	zipDir(t, fixture, filepath.Join(city, "a.zip"), "")
+	zipDir(t, writeFeed(t, otherFeed), filepath.Join(city, "b.zip"), "nested/")
+	bundle := filepath.Join(t.TempDir(), "bundle.zip")
+	zipDir(t, city, bundle, "")
+
+	for _, p := range []string{city, bundle} {
+		n := load(t, p, Options{})
+		if n.Name() != "Test Transit + Other Rail" {
+			t.Errorf("%s: Name = %q", p, n.Name())
+		}
+		idx := indexes(t, n)
+		for _, id := range []string{"a:A", "a:F", "b:A", "b:B"} {
+			if _, ok := idx[id]; !ok {
+				t.Fatalf("%s: no station %s in %v", p, id, idx)
+			}
+		}
+		rides := n.Rides(idx["a:W"], idx["b:B"])
+		if len(rides) != 2 || rides[0].Line != "M" || rides[1].Line != "O" {
+			t.Fatalf("%s: W to other B should ride M then O: %+v", p, rides)
+		}
+		// M from W to F (420 s + 180 s wait), walk to other A, O to B
+		// (120 s + 300 s wait).
+		walk := transfer + geo.Distance(n.Stations()[idx["a:F"]].Pos, n.Stations()[idx["b:A"]].Pos)*walkDetour/walkSpeed
+		want := entry + waitM + 420 + walk + 300 + 120
+		if got, _ := n.Time(idx["a:W"], idx["b:B"]); !near(got, want) {
+			t.Errorf("%s: Time(W, other B) = %v, want %v", p, got, want)
+		}
+	}
+
+	nets, err := LoadDir(filepath.Dir(city), Options{})
+	if err != nil || len(nets) != 1 {
+		t.Fatalf("LoadDir: %d networks, err %v; want the city folder as one", len(nets), err)
+	}
+}

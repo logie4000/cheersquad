@@ -87,7 +87,7 @@ the image; fetch them on the host:
 
 ```sh
 cd /srv/cheersquad
-deploy/scripts/fetch-gtfs.sh nyc            # also: boston, chicago, dc, london, NAME=URL
+deploy/scripts/fetch-gtfs.sh nyc            # see fetch-gtfs.sh --help for all cities, or NAME=URL
 docker restart cheersquad                   # the server loads feeds at startup
 docker logs cheersquad 2>&1 | grep -i gtfs  # check which feeds loaded
 ```
@@ -122,7 +122,18 @@ docker run --rm -v "${PWD}/gtfs:/gtfs" -v "${PWD}/deploy/scripts:/scripts:ro" `
   "pip install -q --root-user-action=ignore transx2gtfs==0.6.0 && python /scripts/tfl_to_gtfs.py /gtfs/london.zip"
 ```
 
-Any other agency's feed works with `NAME=URL`. Agencies publish new feeds a
+Also built in: `philadelphia` (SEPTA), `minneapolis` (Metro Transit),
+`paris` (Ile-de-France Mobilites, about 145 MB), `rome` (Roma Mobilita), `sf`
+and `sydney`. A city whose agencies publish separately gets a folder of
+zips, which the server merges into one network with walking transfers
+between them: `sf/` holds BART and Muni, `sydney/` holds Sydney Trains,
+Metro and light rail. `sydney` needs a free Transport for NSW key from
+<https://opendata.transport.nsw.gov.au>:
+`TFNSW_API_KEY=... deploy/scripts/fetch-gtfs.sh sydney`. Cape Town has no
+subway or metro (MyCiTi is bus rapid transit), so it has no feed.
+
+Any other agency's feed works with `NAME=URL`; to merge several agencies,
+save their zips in one folder under the GTFS folder. Agencies publish new feeds a
 few times a year (service changes, holidays), so refetch before a race and
 restart; a failed download leaves the old file in place. With no feeds, or
 a course outside every feed's area, transit falls back to the straight-line

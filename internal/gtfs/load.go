@@ -145,8 +145,8 @@ func Load(path string, opts Options) (*Network, error) {
 	return n, nil
 }
 
-// LoadDir loads every .zip file and every subdirectory containing stops.txt
-// in dir. Feeds that fail to load are skipped; their errors are joined into
+// LoadDir loads every .zip file in dir, and every subdirectory containing
+// stops.txt or feed zips to merge. Feeds that fail to load are skipped; their errors are joined into
 // the returned error alongside the networks that did load.
 func LoadDir(dir string, opts Options) ([]*Network, error) {
 	entries, err := os.ReadDir(dir)
@@ -158,7 +158,9 @@ func LoadDir(dir string, opts Options) ([]*Network, error) {
 	for _, e := range entries {
 		p := filepath.Join(dir, e.Name())
 		if e.IsDir() {
-			if _, err := os.Stat(filepath.Join(p, "stops.txt")); err != nil {
+			// A feed's files, or several feed zips merged into one.
+			zips, _ := filepath.Glob(filepath.Join(p, "*.zip"))
+			if _, err := os.Stat(filepath.Join(p, "stops.txt")); err != nil && len(zips) == 0 {
 				continue
 			}
 		} else if !strings.EqualFold(filepath.Ext(e.Name()), ".zip") {
@@ -263,16 +265,26 @@ func build(fsys fs.FS, fallbackName string, o Options) (*Network, error) {
 	if kept == 0 {
 		return nil, errors.New("no subway trips run on the selected service day")
 	}
-	name := mainAgency(agencies, lines, trips, keep)
-	if name == "" {
-		name = fallbackName
-	}
-
 	freqs, err := readFrequencies(fsys, tripIdx, keep)
 	if err != nil {
 		return nil, err
 	}
 	dropInfrequentRail(lines, trips, tripStops, freqs, o)
+
+	ranked := rankAgencies(agencies, lines, trips, tripStops)
+	name := ""
+	if _, merged := fsys.(*mergedFeed); merged {
+		name = strings.Join(ranked, " + ")
+	} else if len(agencies) == 1 {
+		for _, n := range agencies {
+			name = n
+		}
+	} else if len(ranked) > 0 {
+		name = ranked[0]
+	}
+	if name == "" {
+		name = fallbackName
+	}
 
 	// Walk every kept trip in feed order, collecting ride observations,
 	// on-train continuations and departures.
@@ -536,28 +548,28 @@ func readAgency(fsys fs.FS) (map[string]string, error) {
 	}
 }
 
-// mainAgency names the network after the agency running the most kept
-// trips: a feed's first agency can be a minor partner (the MBTA feed lists
-// the Cape Cod RTA first).
-func mainAgency(agencies map[string]string, lines []line, trips []tripRow, keep []bool) string {
-	if len(agencies) == 1 {
-		for _, n := range agencies {
-			return n
-		}
-	}
+// rankAgencies returns the names of the agencies running the network's
+// trips, most trips first. A feed's first agency can be a minor partner
+// (the MBTA feed lists the Cape Cod RTA first), so the first name here is
+// the one a network is named after.
+func rankAgencies(agencies map[string]string, lines []line, trips []tripRow, tripStops [][]stopTime) []string {
 	count := map[string]int{}
 	for i, t := range trips {
-		if keep[i] {
-			count[lines[t.route].agency]++
+		if n := agencies[lines[t.route].agency]; n != "" && len(tripStops[i]) > 1 {
+			count[n]++
 		}
 	}
-	best, bestN := "", 0
-	for id, n := range count {
-		if agencies[id] != "" && (n > bestN || (n == bestN && id < best)) {
-			best, bestN = id, n
-		}
+	names := make([]string, 0, len(count))
+	for n := range count {
+		names = append(names, n)
 	}
-	return agencies[best]
+	sort.Slice(names, func(i, j int) bool {
+		if count[names[i]] != count[names[j]] {
+			return count[names[i]] > count[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	return names
 }
 
 // dropInfrequentRail clears the stop times of trips on rail routes whose

@@ -26,22 +26,35 @@
 #            refuses the download (403 from cloud hosts), download
 #            journey-planner-timetables.zip in a browser and set
 #            TFL_TIMETABLES_FILE to it
+#   philadelphia  SEPTA (Market-Frankford, Broad Street, trolleys; one zip
+#            holding SEPTA's bus and rail feeds, which the server merges)
+#   minneapolis   Metro Transit (Blue and Green light rail lines)
+#   paris    Ile-de-France Mobilites (metro, RER, trams; about 145 MB)
+#   rome     Roma Mobilita (metro A, B, C and trams)
+#   sf       BART and Muni (Muni Metro), saved as sf/bart.zip and
+#            sf/muni.zip; a folder of zips loads as one network
+#   sydney   Sydney Trains, Metro and light rail, saved in sydney/; needs a
+#            free API key from https://opendata.transport.nsw.gov.au in
+#            TFNSW_API_KEY
+# (Cape Town has no subway or metro: MyCiTi is bus rapid transit.)
 set -euo pipefail
 
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"
 
 usage() {
-  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
-# fetch NAME URL [curl args...]
+# fetch NAME URL [curl args...]; NAME may be CITY/FEED, for one of several
+# feeds in a city folder.
 fetch() {
   local name=$1 url=$2
   shift 2
   local dest="$dir/$name.zip"
   local tmp
-  tmp=$(mktemp "$dir/.$name.zip.XXXXXX")
+  mkdir -p "$(dirname "$dest")"
+  tmp=$(mktemp "$(dirname "$dest")/.$(basename "$name").zip.XXXXXX")
   echo "fetching $name from $url"
   if ! curl -fsSL --retry 3 -o "$tmp" "$@" "$url"; then
     rm -f "$tmp"
@@ -78,6 +91,32 @@ for arg in "$@"; do
       # Header from a file descriptor keeps the key out of the process list.
       fetch dc https://api.wmata.com/gtfs/rail-gtfs-static.zip \
         -H @<(printf 'api_key: %s\n' "$WMATA_API_KEY") || status=1
+      ;;
+    philadelphia) fetch philadelphia https://github.com/septadev/GTFS/releases/latest/download/gtfs_public.zip || status=1 ;;
+    minneapolis) fetch minneapolis https://svc.metrotransit.org/mtgtfs/gtfs.zip || status=1 ;;
+    paris) fetch paris https://eu.ftp.opendatasoft.com/stif/GTFS/IDFM-gtfs.zip || status=1 ;;
+    rome) fetch rome https://romamobilita.it/sites/default/files/rome_static_gtfs.zip || status=1 ;;
+    sf)
+      fetch sf/bart https://www.bart.gov/dev/schedules/google_transit.zip || status=1
+      fetch sf/muni https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip || status=1
+      ;;
+    sydney)
+      if [ -z "${TFNSW_API_KEY:-}" ]; then
+        echo "sydney: set TFNSW_API_KEY (free key from https://opendata.transport.nsw.gov.au)" >&2
+        status=1
+        continue
+      fi
+      tfnsw=https://api.transport.nsw.gov.au
+      for feed in trains=v1/gtfs/schedule/sydneytrains metro=v2/gtfs/schedule/metro \
+        lightrail-cbd=v1/gtfs/schedule/lightrail/cbdandsoutheast \
+        lightrail-innerwest=v1/gtfs/schedule/lightrail/innerwest; do
+        fetch "sydney/${feed%%=*}" "$tfnsw/${feed#*=}" \
+          -H @<(printf 'Authorization: apikey %s\n' "$TFNSW_API_KEY") || status=1
+      done
+      ;;
+    capetown | cape-town)
+      echo "$arg: Cape Town has no subway or metro (MyCiTi is bus rapid transit), so there is no feed to use" >&2
+      status=1
       ;;
     london)
       # TfL publishes TransXChange, not GTFS; convert it with transx2gtfs.
@@ -119,7 +158,7 @@ for arg in "$@"; do
       fetch "${host//[^A-Za-z0-9_-]/_}" "$arg" || status=1
       ;;
     *)
-      echo "unknown feed '$arg'; known: nyc boston chicago dc london, or NAME=URL" >&2
+      echo "unknown feed '$arg'; known: nyc boston chicago dc london philadelphia minneapolis paris rome sf sydney, or NAME=URL" >&2
       status=1
       ;;
   esac
