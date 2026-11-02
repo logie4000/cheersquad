@@ -237,7 +237,8 @@ export class App implements OnInit {
       next: (r) => {
         this.result.set(r);
         this.loading.set(false);
-        if (r.plan.stops.length === 0) {
+        // With no transit data the sightings table says so instead.
+        if (r.plan.stops.length === 0 && !r.noTransit) {
           this.error.set(
             'No spot is reachable in time. Try setting off earlier or a faster travel mode.',
           );

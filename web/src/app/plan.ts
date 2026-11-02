@@ -88,6 +88,8 @@ export interface PlanResponse {
   legs?: Step[][];
   /** Pinned spots the plan could not visit: off the course or not reachable in time. */
   missedPins?: LatLon[];
+  /** Set in transit mode when no subway or rail data covers the course: why there is no plan. */
+  noTransit?: string;
 }
 
 /** A preloaded race course from GET api/races. */

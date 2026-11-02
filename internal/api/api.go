@@ -163,6 +163,10 @@ type Response struct {
 	// MissedPins are the pinned spots the plan does not visit, because
 	// they are too far from the course or cannot be reached in time.
 	MissedPins []geo.LatLon `json:"missedPins"`
+	// NoTransit, set only in transit mode, says why there is no plan: no
+	// subway or rail network covers the course or the spectator's start.
+	// The plan then has no stops.
+	NoTransit string `json:"noTransit,omitempty"`
 }
 
 // Config is what the server knows beyond a single request.
@@ -318,6 +322,20 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	}
 
 	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
+	if rt.noTransit != "" {
+		// A straight-line guess at transit times would promise trains
+		// that may not exist, so there is no plan at all.
+		return &Response{
+			Course:     Course{Points: track.Points, Length: track.Length()},
+			Mode:       mode,
+			Candidates: len(nodes),
+			Plan:       planner.Plan{Stops: []planner.Stop{}},
+			Routing:    rt.label,
+			Legs:       [][]travel.Step{},
+			MissedPins: missedPins(p.Pinned, nil),
+			NoTransit:  rt.noTransit,
+		}, nil
+	}
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
 		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
@@ -464,6 +482,8 @@ type routing struct {
 	walk  travel.Provider
 	net   travel.Network // nil unless transit runs on a subway
 	label string
+	// noTransit, in transit mode, says why no network can be used.
+	noTransit string
 }
 
 func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, course []geo.LatLon) routing {
@@ -489,11 +509,11 @@ func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, 
 				return routing{walk: walk, net: n, label: fmt.Sprintf("Subway: %s (%s schedule), walking: %s", n.Name(), schedule.label(), walkName)}
 			}
 		}
-		why := "no subway data covers this course"
+		why := "No transit data is available for this course: no subway or rail network the planner knows covers it."
 		if len(nets) == 0 {
-			why = "no subway data loaded"
+			why = "No transit data is available: the server has no subway or rail networks loaded."
 		}
-		return routing{walk: stub, label: "Straight-line estimate (" + why + ")"}
+		return routing{walk: stub, label: "No transit data", noTransit: why + " Try walking instead."}
 	}
 	return routing{walk: stub, label: "Straight-line estimate"}
 }

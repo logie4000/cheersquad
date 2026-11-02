@@ -297,19 +297,38 @@ func TestPlanTransitUsesSubwayForPartialCoverage(t *testing.T) {
 	}
 }
 
-func TestPlanTransitFallsBackWithoutCoverage(t *testing.T) {
-	resp := planTransit(t, Config{Networks: []travel.Network{courseNet{covers: false}}})
-	if !strings.Contains(resp.Routing, "no subway data covers") {
-		t.Fatalf("routing %q", resp.Routing)
-	}
-	for _, leg := range resp.Legs {
-		if len(leg) != 1 || leg[0].Kind != travel.StepTransit {
-			t.Fatalf("fallback legs should be one straight-line transit step: %+v", leg)
+// With no network covering the course, transit mode gives no plan rather
+// than straight-line guesses, and says why.
+func TestPlanTransitWithoutCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"not covered", Config{Networks: []travel.Network{courseNet{covers: false}}}, "No transit data is available for this course"},
+		{"none loaded", Config{}, "no subway or rail networks loaded"},
+	} {
+		resp := planTransit(t, tc.cfg)
+		if !strings.Contains(resp.NoTransit, tc.want) {
+			t.Errorf("%s: noTransit %q, want it to contain %q", tc.name, resp.NoTransit, tc.want)
+		}
+		if len(resp.Plan.Stops) != 0 || resp.Plan.Sightings != 0 || len(resp.Course.Points) == 0 {
+			t.Errorf("%s: want the course and no stops, got %d stops, %d course points", tc.name, len(resp.Plan.Stops), len(resp.Course.Points))
 		}
 	}
-	resp = planTransit(t, Config{})
-	if !strings.Contains(resp.Routing, "no subway data loaded") {
-		t.Fatalf("routing %q", resp.Routing)
+	// Walking still plans without any network.
+	rec := requestWith(t, Config{}, straightGPX, `{
+		"runner": {"finishSeconds": 3000},
+		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "walk", "bufferSeconds": 60, "startTimeSeconds": -600},
+		"certifiedMeters": 10000,
+		"spacingMeters": 1000
+	}`)
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.NoTransit != "" || len(resp.Plan.Stops) == 0 {
+		t.Fatalf("walk mode: noTransit %q, %d stops", resp.NoTransit, len(resp.Plan.Stops))
 	}
 }
 

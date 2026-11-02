@@ -137,8 +137,8 @@ Any other agency's feed works with `NAME=URL`; to merge several agencies,
 save their zips in one folder under the GTFS folder. Agencies publish new feeds a
 few times a year (service changes, holidays), so refetch before a race and
 restart; a failed download leaves the old file in place. With no feeds, or
-a course outside every feed's area, transit falls back to the straight-line
-estimate, and the plan says which routing it used.
+a course outside every feed's area, transit mode gives no plan: the sightings
+table says no transit data is available, so walking is the option there.
 
 Walking legs are straight-line estimates by default. For street-network
 walking times, run a self-hosted [OSRM](https://project-osrm.org/) with the

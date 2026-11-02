@@ -222,6 +222,25 @@ describe('App', () => {
     expect(el.querySelector('.routing')).toBeNull();
   });
 
+  it('says in the sightings table when there is no transit data', () => {
+    const fixture = TestBed.createComponent(App);
+    const message = 'No transit data is available for this course. Try walking instead.';
+    fixture.componentInstance.result.set({
+      ...base,
+      plan: { stops: [], sightings: 0, value: 0 },
+      routing: 'No transit data',
+      legs: [],
+      noTransit: message,
+    });
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const rows = el.querySelectorAll('tbody tr');
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent?.trim()).toBe(message);
+    expect(el.querySelector('.routing')).toBeNull();
+    expect(el.querySelector('.exports')).toBeNull();
+  });
+
   describe('distance units', () => {
     beforeEach(() => {
       try {
