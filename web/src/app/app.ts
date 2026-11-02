@@ -2,6 +2,8 @@ import { Component, computed, inject, OnInit, signal, viewChild } from '@angular
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { CourseMap, DEFAULT_COURSE_COLOR } from './course-map';
 import {
+  compactGpx,
+  COMPACT_GPX_OVER,
   buildParams,
   convertDistance,
   DistanceUnit,
@@ -231,9 +233,15 @@ export class App implements OnInit {
       this.error.set(params);
       return;
     }
+    // Send big recordings as just their points, which also fit the
+    // server's upload limit.
+    const upload =
+      file.size > COMPACT_GPX_OVER
+        ? new File([compactGpx(this.course())], file.name, { type: 'application/gpx+xml' })
+        : file;
     this.error.set(null);
     this.loading.set(true);
-    this.api.plan(file, params).subscribe({
+    this.api.plan(upload, params).subscribe({
       next: (r) => {
         this.result.set(r);
         this.loading.set(false);

@@ -5,7 +5,7 @@ import { By } from '@angular/platform-browser';
 import { App } from './app';
 import { CourseMap } from './course-map';
 import { PlanPdf } from './pdf-export';
-import { PlanResponse } from './plan';
+import { parseGpxPoints, PlanResponse } from './plan';
 import { PlanService } from './plan.service';
 
 const GPX = `<gpx><trk><trkseg>
@@ -42,6 +42,21 @@ describe('App', () => {
     const app = TestBed.createComponent(App).componentInstance;
     app.submit();
     expect(app.error()).toContain('GPX');
+  });
+
+  it('uploads big GPX recordings as just their points', async () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    const pt = `<trkpt lat="38.88" lon="-77.06"><extensions>${' '.repeat(1000)}</extensions></trkpt>`;
+    const big = `<gpx><trk><trkseg>${pt.repeat(1100)}<trkpt lat="38.89" lon="-77.05"/></trkseg></trk></gpx>`;
+    await app.loadCourse(new File([big], 'mcm.gpx'));
+    app.onMapClick({ lat: 38.88, lon: -77.06 });
+    app.submit();
+    const req = http.expectOne('api/plan');
+    const sent = (req.request.body as FormData).get('gpx') as File;
+    expect(sent.name).toBe('mcm.gpx');
+    expect(sent.size).toBeLessThan(100_000);
+    expect(parseGpxPoints(await sent.text())).toEqual(app.course());
   });
 
   describe('preloaded races', () => {

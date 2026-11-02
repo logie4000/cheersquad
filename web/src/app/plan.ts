@@ -245,6 +245,23 @@ export function parseGpxPoints(text: string): LatLon[] {
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
 }
 
+/**
+ * GPX files bigger than this are uploaded as just their course points. The
+ * server takes 3 MB, and a watch recording carries time, elevation, heart
+ * rate and cadence on every point, so a marathon can run to several MB.
+ */
+export const COMPACT_GPX_OVER = 1 << 20;
+
+/** A minimal GPX of the course points, as one track segment. */
+export function compactGpx(points: LatLon[]): string {
+  const pts = points.map((p) => `<trkpt lat="${p.lat}" lon="${p.lon}"/>`).join('\n');
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<gpx version="1.1" creator="Cheer Squad" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+    `<trk><trkseg>\n${pts}\n</trkseg></trk>\n</gpx>\n`
+  );
+}
+
 /** Form values as the user enters them. */
 export interface PlanForm {
   goalFinish: string; // h:mm:ss chip time
