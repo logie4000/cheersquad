@@ -83,6 +83,9 @@ func TestPlanEndToEnd(t *testing.T) {
 	if resp.Routing != "Straight-line estimate" || len(resp.Legs) != len(resp.Plan.Stops) {
 		t.Fatalf("routing %q, %d legs for %d stops", resp.Routing, len(resp.Legs), len(resp.Plan.Stops))
 	}
+	if f := resp.Finish; math.Abs(f.Expected-3000) > 1e-6 || f.Fast > f.Expected || f.Slow < f.Expected {
+		t.Fatalf("finish %+v, want 3000 s expected between fast and slow", f)
+	}
 	if resp.Plan.Sightings < 2 {
 		t.Fatalf("a driver (about 4.2 m/s door to door) should leapfrog the runner, got %d sightings", resp.Plan.Sightings)
 	}
@@ -297,20 +300,54 @@ func TestPlanTransitUsesSubwayForPartialCoverage(t *testing.T) {
 	}
 }
 
-func TestPlanTransitFallsBackWithoutCoverage(t *testing.T) {
-	resp := planTransit(t, Config{Networks: []travel.Network{courseNet{covers: false}}})
-	if !strings.Contains(resp.Routing, "no subway data covers") {
-		t.Fatalf("routing %q", resp.Routing)
-	}
-	for _, leg := range resp.Legs {
-		if len(leg) != 1 || leg[0].Kind != travel.StepTransit {
-			t.Fatalf("fallback legs should be one straight-line transit step: %+v", leg)
+// With no network covering the course, transit mode walks between spots
+// rather than guessing at transit speeds, and says why.
+func TestPlanTransitWithoutCoverage(t *testing.T) {
+	walked := planWalk(t)
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"not covered", Config{Networks: []travel.Network{courseNet{covers: false}}}, "No transit data is available for this course"},
+		{"none loaded", Config{}, "no subway or rail networks loaded"},
+	} {
+		resp := planTransit(t, tc.cfg)
+		if !strings.Contains(resp.NoTransit, tc.want) || !strings.Contains(resp.NoTransit, "walks") {
+			t.Errorf("%s: noTransit %q, want it to contain %q", tc.name, resp.NoTransit, tc.want)
+		}
+		if resp.Mode != travel.Walk || !strings.HasPrefix(resp.Routing, "Walking") {
+			t.Errorf("%s: mode %q, routing %q; want walking", tc.name, resp.Mode, resp.Routing)
+		}
+		if len(resp.Plan.Stops) == 0 || resp.Plan.Sightings != walked.Plan.Sightings {
+			t.Errorf("%s: %d sightings, want the walking plan's %d", tc.name, resp.Plan.Sightings, walked.Plan.Sightings)
+		}
+		for _, leg := range resp.Legs {
+			for _, s := range leg {
+				if s.Kind != travel.StepWalk {
+					t.Fatalf("%s: legs should only walk: %+v", tc.name, leg)
+				}
+			}
 		}
 	}
-	resp = planTransit(t, Config{})
-	if !strings.Contains(resp.Routing, "no subway data loaded") {
-		t.Fatalf("routing %q", resp.Routing)
+	if walked.NoTransit != "" {
+		t.Fatalf("walk mode: noTransit %q", walked.NoTransit)
 	}
+}
+
+func planWalk(t *testing.T) Response {
+	t.Helper()
+	rec := requestWith(t, Config{}, straightGPX, `{
+		"runner": {"finishSeconds": 3000},
+		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "walk", "bufferSeconds": 60, "startTimeSeconds": -600},
+		"certifiedMeters": 10000,
+		"spacingMeters": 1000
+	}`)
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp
 }
 
 // Boston runs on a Monday: the weekday network is used when asked for, and

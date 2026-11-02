@@ -204,7 +204,7 @@
     </div>
 
     @if (result(); as r) {
-      @if (r.plan.stops.length > 0) {
+      @if (r.plan.stops.length > 0 || r.noTransit) {
         @if (r.routing) {
           <p class="note routing">Routing: {{ r.routing }}</p>
         }
@@ -226,6 +226,11 @@
             </tr>
           </thead>
           <tbody>
+            @if (r.noTransit) {
+              <tr>
+                <td colspan="6" class="no-transit" role="status">{{ r.noTransit }}</td>
+              </tr>
+            }
             @for (s of r.plan.stops; track s.node.id; let i = $index) {
               @let steps = legs()[i];
               <tr [class.has-leg]="steps.length > 0">
@@ -272,6 +277,18 @@
                   </td>
                 </tr>
               }
+            }
+            @if (r.finish; as f) {
+              <tr class="finish">
+                <td>Finish</td>
+                <td>{{ distance(r.course.length) }}</td>
+                <td colspan="2">Expected finish</td>
+                <td>
+                  {{ clock(f.tExpected) }}
+                  <small>({{ clock(f.tFast) }}–{{ clock(f.tSlow) }})</small>
+                </td>
+                <td></td>
+              </tr>
             }
           </tbody>
         </table>

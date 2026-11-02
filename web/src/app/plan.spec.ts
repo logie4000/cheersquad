@@ -1,5 +1,6 @@
 import {
   buildParams,
+  compactGpx,
   formatClock,
   formatMinutes,
   legSteps,
@@ -127,6 +128,18 @@ describe('parseGpxPoints', () => {
 
   it('returns nothing for invalid XML', () => {
     expect(parseGpxPoints('<gpx')).toEqual([]);
+  });
+});
+
+describe('compactGpx', () => {
+  it('keeps every point and nothing else', () => {
+    const pts = [
+      { lat: 38.882153, lon: -77.062413 },
+      { lat: 38.8821, lon: -77.06 },
+    ];
+    const gpx = compactGpx(pts);
+    expect(parseGpxPoints(gpx)).toEqual(pts);
+    expect(gpx).not.toContain('<time>');
   });
 });
 

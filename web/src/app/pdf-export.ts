@@ -25,6 +25,8 @@ export interface PdfPlan {
   routing?: string;
   columns: string[];
   rows: { cells: string[]; link?: string; steps?: Step[] }[];
+  /** A last, muted row with the runner's expected finish; not a sighting. */
+  finish?: string[];
   note: string;
   map: MapScene;
 }
@@ -361,6 +363,20 @@ export class PlanPdf {
         stepRows.push(steps);
       }
     }
+    if (plan.finish) {
+      // Its label spans the Leave and Arrive columns, as on screen.
+      const [num, dist, label, , ...rest] = plan.finish;
+      body.push([
+        { content: pdfText(num) },
+        { content: pdfText(dist) },
+        { content: pdfText(label), colSpan: 2 },
+        ...rest.map((c) => ({ content: pdfText(c) })),
+      ]);
+      links.push(undefined);
+      ruled.push(false);
+      stepRows.push(undefined);
+    }
+    const finishRow = plan.finish ? body.length - 1 : -1;
     autoTable(doc, {
       startY: y + 4,
       margin: { left: MARGIN, right: MARGIN },
@@ -385,6 +401,10 @@ export class PlanPdf {
         }
         // The distance links to Google Maps, as on screen.
         if (d.column.index === 1 && links[d.row.index]) d.cell.styles.textColor = ACCENT;
+        if (d.row.index === finishRow) {
+          d.cell.styles.textColor = MUTED;
+          d.cell.styles.fontStyle = 'italic';
+        }
       },
       didDrawCell: (d) => {
         if (d.section !== 'body') return;

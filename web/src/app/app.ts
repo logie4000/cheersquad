@@ -2,6 +2,8 @@ import { Component, computed, inject, OnInit, signal, viewChild } from '@angular
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { CourseMap, DEFAULT_COURSE_COLOR } from './course-map';
 import {
+  compactGpx,
+  COMPACT_GPX_OVER,
   buildParams,
   convertDistance,
   DistanceUnit,
@@ -231,9 +233,15 @@ export class App implements OnInit {
       this.error.set(params);
       return;
     }
+    // Send big recordings as just their points, which also fit the
+    // server's upload limit.
+    const upload =
+      file.size > COMPACT_GPX_OVER
+        ? new File([compactGpx(this.course())], file.name, { type: 'application/gpx+xml' })
+        : file;
     this.error.set(null);
     this.loading.set(true);
-    this.api.plan(file, params).subscribe({
+    this.api.plan(upload, params).subscribe({
       next: (r) => {
         this.result.set(r);
         this.loading.set(false);
@@ -292,7 +300,9 @@ export class App implements OnInit {
     return {
       summary: this.planSummary(),
       heading: `${n} sighting${n === 1 ? '' : 's'}`,
-      routing: r.routing ? `Routing: ${r.routing}` : undefined,
+      routing:
+        [r.routing ? `Routing: ${r.routing}.` : '', r.noTransit ?? ''].join(' ').trim() ||
+        undefined,
       columns: [
         '#',
         this.unit() === 'km' ? 'Km' : 'Mile',
@@ -313,6 +323,14 @@ export class App implements OnInit {
         link: this.mapsLink(s.node.pos),
         steps: legs[i],
       })),
+      finish: r.finish && [
+        'Finish',
+        this.distance(r.course.length),
+        'Expected finish',
+        '',
+        `${this.clock(r.finish.tExpected)} (${this.clock(r.finish.tFast)}–${this.clock(r.finish.tSlow)})`,
+        '',
+      ],
       note:
         'Leave each spot as soon as your runner goes by. Times shown are for a runner on pace; each hop leaves enough time even if they run faster than expected.' +
         (r.routing ? '' : ' Travel times are straight-line estimates for now, not real routes.'),

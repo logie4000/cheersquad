@@ -5,7 +5,7 @@ import { By } from '@angular/platform-browser';
 import { App } from './app';
 import { CourseMap } from './course-map';
 import { PlanPdf } from './pdf-export';
-import { PlanResponse } from './plan';
+import { parseGpxPoints, PlanResponse } from './plan';
 import { PlanService } from './plan.service';
 
 const GPX = `<gpx><trk><trkseg>
@@ -42,6 +42,21 @@ describe('App', () => {
     const app = TestBed.createComponent(App).componentInstance;
     app.submit();
     expect(app.error()).toContain('GPX');
+  });
+
+  it('uploads big GPX recordings as just their points', async () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    const pt = `<trkpt lat="38.88" lon="-77.06"><extensions>${' '.repeat(1000)}</extensions></trkpt>`;
+    const big = `<gpx><trk><trkseg>${pt.repeat(1100)}<trkpt lat="38.89" lon="-77.05"/></trkseg></trk></gpx>`;
+    await app.loadCourse(new File([big], 'mcm.gpx'));
+    app.onMapClick({ lat: 38.88, lon: -77.06 });
+    app.submit();
+    const req = http.expectOne('api/plan');
+    const sent = (req.request.body as FormData).get('gpx') as File;
+    expect(sent.name).toBe('mcm.gpx');
+    expect(sent.size).toBeLessThan(100_000);
+    expect(parseGpxPoints(await sent.text())).toEqual(app.course());
   });
 
   describe('preloaded races', () => {
@@ -220,6 +235,45 @@ describe('App', () => {
     expect(el.querySelectorAll('tbody tr').length).toBe(1);
     expect(el.querySelector('.steps')).toBeNull();
     expect(el.querySelector('.routing')).toBeNull();
+  });
+
+  it('says in the sightings table when the plan walks for lack of transit data', () => {
+    const fixture = TestBed.createComponent(App);
+    const message =
+      'No transit data is available for this course: no subway or rail network the planner knows covers it. This plan walks between spots.';
+    fixture.componentInstance.result.set({
+      ...base,
+      mode: 'walk',
+      routing: 'Walking: straight-line estimate',
+      noTransit: message,
+    });
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const rows = el.querySelectorAll('tbody tr');
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent?.trim()).toBe(message);
+    expect(rows[1].textContent).toContain('walk');
+    expect(el.querySelector('.exports')).not.toBeNull();
+  });
+
+  it("adds the runner's expected finish as a last row, on screen and in the PDF", async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.result.set({ ...base, finish: { tFast: 13000, tExpected: 14400, tSlow: 15800 } });
+    fixture.detectChanges();
+    const rows = (fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr');
+    const last = rows[rows.length - 1];
+    expect(last.classList).toContain('finish');
+    expect(last.textContent?.replace(/\s+/g, ' ')).toContain('26.2');
+    expect(last.textContent).toContain('Expected finish');
+    expect(app.pdfPlan()?.finish).toEqual([
+      'Finish',
+      '26.2',
+      'Expected finish',
+      '',
+      `${app.clock(14400)} (${app.clock(13000)}–${app.clock(15800)})`,
+      '',
+    ]);
   });
 
   describe('distance units', () => {

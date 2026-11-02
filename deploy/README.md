@@ -123,7 +123,8 @@ docker run --rm -v "${PWD}/gtfs:/gtfs" -v "${PWD}/deploy/scripts:/scripts:ro" `
 ```
 
 Also built in: `philadelphia` (SEPTA), `minneapolis` (Metro Transit),
-`paris` (Ile-de-France Mobilites, about 145 MB), `rome` (Roma Mobilita), `sf`
+`paris` (Ile-de-France Mobilites, about 145 MB), `rome` (Roma Mobilita), `la`
+(LA Metro Rail), `sf`
 and `sydney`. A city whose agencies publish separately gets a folder of
 zips, which the server merges into one network with walking transfers
 between them: `sf/` holds BART and Muni, `sydney/` holds Sydney Trains,
@@ -136,8 +137,9 @@ Any other agency's feed works with `NAME=URL`; to merge several agencies,
 save their zips in one folder under the GTFS folder. Agencies publish new feeds a
 few times a year (service changes, holidays), so refetch before a race and
 restart; a failed download leaves the old file in place. With no feeds, or
-a course outside every feed's area, transit falls back to the straight-line
-estimate, and the plan says which routing it used.
+a course outside every feed's area, transit mode walks between spots instead
+of guessing at transit speeds, and the sightings table says no transit data
+is available.
 
 Walking legs are straight-line estimates by default. For street-network
 walking times, run a self-hosted [OSRM](https://project-osrm.org/) with the

@@ -163,6 +163,20 @@ type Response struct {
 	// MissedPins are the pinned spots the plan does not visit, because
 	// they are too far from the course or cannot be reached in time.
 	MissedPins []geo.LatLon `json:"missedPins"`
+	// Finish is when the runner is expected to finish (fastest, expected
+	// and slowest, as for each stop's runner times). It is not a sighting.
+	Finish PassTimes `json:"finish"`
+	// NoTransit, set only when transit was asked for, says that no subway
+	// or rail network covers the course or the spectator's start, so the
+	// plan walks between spots instead (Mode is then walk).
+	NoTransit string `json:"noTransit,omitempty"`
+}
+
+// PassTimes are when the runner reaches a point, in seconds since the gun.
+type PassTimes struct {
+	Fast     float64 `json:"tFast"`
+	Expected float64 `json:"tExpected"`
+	Slow     float64 `json:"tSlow"`
 }
 
 // Config is what the server knows beyond a single request.
@@ -318,6 +332,11 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	}
 
 	rt := chooseRouting(cfg, mode, day, p.Spectator.Start, track.Points)
+	if rt.noTransit != "" {
+		// A straight-line guess at transit speeds would promise trains that
+		// may not exist, so the spectator walks between spots instead.
+		mode = travel.Walk
+	}
 	walk := rt.walk
 	if len(p.Crossings) > 0 {
 		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
@@ -380,6 +399,12 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		Routing:    rt.label,
 		Legs:       legs,
 		MissedPins: missedPins(p.Pinned, plan.Stops),
+		Finish: PassTimes{
+			Fast:     profile.Fast(profile.Distance),
+			Expected: profile.Expected(profile.Distance),
+			Slow:     profile.Slow(profile.Distance),
+		},
+		NoTransit: rt.noTransit,
 	}, nil
 }
 
@@ -464,6 +489,9 @@ type routing struct {
 	walk  travel.Provider
 	net   travel.Network // nil unless transit runs on a subway
 	label string
+	// noTransit, in transit mode, says why no network can be used and the
+	// plan walks instead.
+	noTransit string
 }
 
 func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, course []geo.LatLon) routing {
@@ -489,11 +517,11 @@ func chooseRouting(cfg Config, mode travel.Mode, day RaceDay, start geo.LatLon, 
 				return routing{walk: walk, net: n, label: fmt.Sprintf("Subway: %s (%s schedule), walking: %s", n.Name(), schedule.label(), walkName)}
 			}
 		}
-		why := "no subway data covers this course"
+		why := "No transit data is available for this course: no subway or rail network the planner knows covers it."
 		if len(nets) == 0 {
-			why = "no subway data loaded"
+			why = "No transit data is available: the server has no subway or rail networks loaded."
 		}
-		return routing{walk: stub, label: "Straight-line estimate (" + why + ")"}
+		return routing{walk: walk, label: "Walking: " + walkName, noTransit: why + " This plan walks between spots."}
 	}
 	return routing{walk: stub, label: "Straight-line estimate"}
 }
