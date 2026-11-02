@@ -205,7 +205,7 @@
 
     @if (result(); as r) {
       @if (r.plan.stops.length > 0 || r.noTransit) {
-        @if (r.routing && !r.noTransit) {
+        @if (r.routing) {
           <p class="note routing">Routing: {{ r.routing }}</p>
         }
         @if (r.missedPins?.length; as n) {
@@ -280,15 +280,13 @@
             }
           </tbody>
         </table>
-        @if (!r.noTransit) {
-          <p class="note">
-            Leave each spot as soon as your runner goes by. Times shown are for a runner on pace;
-            each hop leaves enough time even if they run faster than expected.
-            @if (!r.routing) {
-              Travel times are straight-line estimates for now, not real routes.
-            }
-          </p>
-        }
+        <p class="note">
+          Leave each spot as soon as your runner goes by. Times shown are for a runner on pace; each
+          hop leaves enough time even if they run faster than expected.
+          @if (!r.routing) {
+            Travel times are straight-line estimates for now, not real routes.
+          }
+        </p>
       }
     }
   </section>

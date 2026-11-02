@@ -237,23 +237,23 @@ describe('App', () => {
     expect(el.querySelector('.routing')).toBeNull();
   });
 
-  it('says in the sightings table when there is no transit data', () => {
+  it('says in the sightings table when the plan walks for lack of transit data', () => {
     const fixture = TestBed.createComponent(App);
-    const message = 'No transit data is available for this course. Try walking instead.';
+    const message =
+      'No transit data is available for this course: no subway or rail network the planner knows covers it. This plan walks between spots.';
     fixture.componentInstance.result.set({
       ...base,
-      plan: { stops: [], sightings: 0, value: 0 },
-      routing: 'No transit data',
-      legs: [],
+      mode: 'walk',
+      routing: 'Walking: straight-line estimate',
       noTransit: message,
     });
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     const rows = el.querySelectorAll('tbody tr');
-    expect(rows.length).toBe(1);
+    expect(rows.length).toBe(2);
     expect(rows[0].textContent?.trim()).toBe(message);
-    expect(el.querySelector('.routing')).toBeNull();
-    expect(el.querySelector('.exports')).toBeNull();
+    expect(rows[1].textContent).toContain('walk');
+    expect(el.querySelector('.exports')).not.toBeNull();
   });
 
   describe('distance units', () => {

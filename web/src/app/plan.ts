@@ -88,7 +88,7 @@ export interface PlanResponse {
   legs?: Step[][];
   /** Pinned spots the plan could not visit: off the course or not reachable in time. */
   missedPins?: LatLon[];
-  /** Set in transit mode when no subway or rail data covers the course: why there is no plan. */
+  /** Set when transit was asked for but no subway or rail data covers the course, so the plan walks. */
   noTransit?: string;
 }
 
