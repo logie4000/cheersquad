@@ -265,11 +265,11 @@ describe('App', () => {
     const last = rows[rows.length - 1];
     expect(last.classList).toContain('finish');
     expect(last.textContent?.replace(/\s+/g, ' ')).toContain('26.2');
-    expect(last.textContent).toContain('Expected finish (not a sighting)');
+    expect(last.textContent).toContain('Expected finish');
     expect(app.pdfPlan()?.finish).toEqual([
       'Finish',
       '26.2',
-      'Expected finish (not a sighting)',
+      'Expected finish',
       '',
       `${app.clock(14400)} (${app.clock(13000)}–${app.clock(15800)})`,
       '',

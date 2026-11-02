@@ -326,7 +326,7 @@ export class App implements OnInit {
       finish: r.finish && [
         'Finish',
         this.distance(r.course.length),
-        'Expected finish (not a sighting)',
+        'Expected finish',
         '',
         `${this.clock(r.finish.tExpected)} (${this.clock(r.finish.tFast)}–${this.clock(r.finish.tSlow)})`,
         '',
