@@ -1,4 +1,6 @@
 import {
+  mapsDirectionsLink,
+  mapsPinLink,
   buildParams,
   compactGpx,
   formatClock,
@@ -205,5 +207,16 @@ describe('leg steps', () => {
     expect(legSteps(r, 0)).toEqual([]);
     expect(legSteps({ ...r, legs: [[walk]] }, 0)).toEqual([walk]);
     expect(legSteps({ ...r, legs: [[walk]] }, 3)).toEqual([]);
+  });
+});
+
+describe('Google Maps links', () => {
+  it('links a pin and directions in the chosen mode', () => {
+    expect(mapsPinLink({ lat: 40.5, lon: -73.9 })).toBe(
+      'https://www.google.com/maps/search/?api=1&query=40.5,-73.9',
+    );
+    expect(mapsDirectionsLink({ lat: 1, lon: 2 }, { lat: 3, lon: 4 }, 'bike')).toBe(
+      'https://www.google.com/maps/dir/?api=1&origin=1,2&destination=3,4&travelmode=bicycling',
+    );
   });
 });

@@ -24,7 +24,8 @@ export interface PdfPlan {
   heading: string;
   routing?: string;
   columns: string[];
-  rows: { cells: string[]; link?: string; steps?: Step[] }[];
+  /** link opens the spot in Google Maps; directions, the way there from the previous stop. */
+  rows: { cells: string[]; link?: string; directions?: string; steps?: Step[] }[];
   /** A last, muted row with the runner's expected finish; not a sighting. */
   finish?: string[];
   note: string;
@@ -342,11 +343,13 @@ export class PlanPdf {
     const stepWidth = MAP_W - FIRST_COL - 2 * PAD;
     const body: { content: string; colSpan?: number; styles?: object }[][] = [];
     const links: (string | undefined)[] = [];
+    const directions: (string | undefined)[] = [];
     const ruled: boolean[] = [];
     const stepRows: (StepLine[] | undefined)[] = [];
     for (const r of plan.rows) {
       body.push(r.cells.map((c) => ({ content: pdfText(c) })));
       links.push(r.link);
+      directions.push(r.directions);
       const steps = r.steps?.length ? layoutSteps(doc, r.steps, stepWidth) : undefined;
       ruled.push(!steps);
       stepRows.push(undefined);
@@ -360,6 +363,7 @@ export class PlanPdf {
           },
         ]);
         links.push(undefined);
+        directions.push(undefined);
         ruled.push(true);
         stepRows.push(steps);
       }
@@ -374,6 +378,7 @@ export class PlanPdf {
         ...rest.map((c) => ({ content: pdfText(c) })),
       ]);
       links.push(undefined);
+      directions.push(undefined);
       ruled.push(false);
       stepRows.push(undefined);
     }
@@ -400,8 +405,10 @@ export class PlanPdf {
           d.cell.styles.lineWidth = { bottom: 0.5 };
           d.cell.styles.lineColor = BORDER;
         }
-        // The distance links to Google Maps, as on screen.
+        // The distance links to the spot in Google Maps and the arrival
+        // time to directions there, as on screen.
         if (d.column.index === 1 && links[d.row.index]) d.cell.styles.textColor = ACCENT;
+        if (d.column.index === 3 && directions[d.row.index]) d.cell.styles.textColor = ACCENT;
         if (d.row.index === finishRow) {
           d.cell.styles.textColor = MUTED;
           d.cell.styles.fontStyle = 'italic';
@@ -409,7 +416,9 @@ export class PlanPdf {
       },
       didDrawCell: (d) => {
         if (d.section !== 'body') return;
-        const url = d.column.index === 1 && links[d.row.index];
+        const url =
+          (d.column.index === 1 && links[d.row.index]) ||
+          (d.column.index === 3 && directions[d.row.index]);
         if (url) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
         const steps = d.column.index === 1 && stepRows[d.row.index];
         if (steps) drawSteps(doc, steps, d.cell.x + PAD, d.cell.y);

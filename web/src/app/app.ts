@@ -14,6 +14,8 @@ import {
   legSteps,
   lineColor,
   MapMarks,
+  mapsDirectionsLink,
+  mapsPinLink,
   parseClock,
   parseGpxPoints,
   PlanForm,
@@ -327,6 +329,7 @@ export class App implements OnInit {
           this.minutes(s.wait),
         ],
         link: this.mapsLink(s.node.pos),
+        directions: this.directionsLink(i) ?? undefined,
         steps: legs[i],
       })),
       finish: r.finish && [
@@ -391,6 +394,14 @@ export class App implements OnInit {
     return bg ? textOn(bg) : null;
   }
   mapsLink(p: LatLon): string {
-    return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+    return mapsPinLink(p);
+  }
+  /** Directions in Google Maps to stop i from the previous stop, or the start. */
+  directionsLink(i: number): string | null {
+    const r = this.result();
+    const stops = r?.plan.stops ?? [];
+    const from = i > 0 ? stops[i - 1]?.node.pos : this.marks().start;
+    if (!r || !from || !stops[i]) return null;
+    return mapsDirectionsLink(from, stops[i].node.pos, r.mode);
   }
 }
