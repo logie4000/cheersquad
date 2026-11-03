@@ -238,7 +238,8 @@ function drawScene(ctx: CanvasRenderingContext2D, v: MapView, m: MapScene): void
     dot(m.course[m.course.length - 1], 5, FG, FG, 2);
   }
 
-  // Legs: walks dashed black, rides in the line's color, straight dashes otherwise.
+  // Legs: walks dashed black, rides in the line's color, bike and car legs
+  // solid along a street route and dashed when estimated.
   let prev = m.start;
   m.stops.forEach((s, i) => {
     const steps = m.legs[i] ?? [];
@@ -251,7 +252,7 @@ function drawScene(ctx: CanvasRenderingContext2D, v: MapView, m: MapScene): void
         const c = lineColor(st.color) ?? LEG;
         line(pts, c, 4, [], 0.85);
         for (const p of [st.fromPos, ...via, st.toPos]) dot(p, 4, '#ffffff', c, 2);
-      } else line(pts, LEG, 3, [6, 6]);
+      } else line(pts, LEG, 3, st.path && st.path.length >= 2 ? [] : [6, 6]);
     }
     prev = s.node.pos;
   });

@@ -18,6 +18,9 @@ services:
       # Optional self-hosted OSRM with the foot profile for walking legs;
       # without it walks are straight-line estimates.
       # OSRM_WALK_URL: http://osrm-foot:5000
+      # OpenRouteService key: the final plan's legs are street routed and
+      # drawn on the map. deploy.sh fills it from SSM; empty means estimates.
+      ORS_API_KEY: ${ORS_API_KEY:-}
     volumes:
       # ./gtfs is /srv/cheersquad/gtfs on the host.
       - ./gtfs:/data/gtfs:ro

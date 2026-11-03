@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/logie4000/cheersquad/internal/candidates"
@@ -74,6 +75,12 @@ const (
 	// CrossingPlanTimeout is the shorter limit for plans with crossing
 	// points, so a slow one gives its slot back sooner.
 	CrossingPlanTimeout = 15 * time.Second
+	// MaxRouteRounds is how many times a plan's legs are street routed and
+	// the plan solved again with the routed times. Each round costs a
+	// router request for each leg not yet routed (more for transit).
+	MaxRouteRounds = 3
+	// RouteWorkers is how many legs are street routed at once.
+	RouteWorkers = 4
 )
 
 // Runner is the runner half of a plan request.
@@ -97,6 +104,8 @@ type Spectator struct {
 	BufferSeconds *float64 `json:"bufferSeconds"`
 	// RaceDay picks the transit timetable; empty means Sunday.
 	RaceDay RaceDay `json:"raceDay"`
+	// AvoidFerries keeps street routes off ferries.
+	AvoidFerries bool `json:"avoidFerries"`
 }
 
 // RaceDay is the kind of day a race is run on, which decides the transit
@@ -193,6 +202,9 @@ type Config struct {
 	Walk travel.Provider
 	// Races are the preloaded courses; nil means the embedded ones.
 	Races *races.Catalog
+	// Streets, if set, routes the final plan's walking, biking and driving
+	// legs street by street (see travel.Routed). Nil means estimates only.
+	Streets travel.StreetRouter
 }
 
 // Course is the (possibly calibrated) course for drawing on the map.
@@ -337,59 +349,84 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		// may not exist, so the spectator walks between spots instead.
 		mode = travel.Walk
 	}
-	walk := rt.walk
-	if len(p.Crossings) > 0 {
-		walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
-	}
-	var provider travel.Provider = walk
-	if rt.net != nil {
-		provider = &travel.Subway{Net: rt.net, Walk: walk}
+	var routed *travel.Routed
+	if cfg.Streets != nil {
+		routed = &travel.Routed{Estimate: rt.walk, Router: cfg.Streets, AvoidFerries: p.Spectator.AvoidFerries, Ctx: ctx}
 	}
 	if pf, ok := rt.walk.(travel.Prefetcher); ok {
 		pts := []geo.LatLon{p.Spectator.Start}
 		for _, n := range nodes {
 			pts = append(pts, n.Pos)
 		}
-		if s, ok := provider.(*travel.Subway); ok {
-			pts = append(pts, s.StationsNear(pts)...)
+		if rt.net != nil {
+			pts = append(pts, (&travel.Subway{Net: rt.net}).StationsNear(pts)...)
 		}
 		pts = append(pts, p.Crossings...)
 		if len(pts) <= MaxPrefetchPoints {
 			pf.Prefetch(pts)
 		}
 	}
-	provider = &travel.Cached{Inner: provider}
-	travelFn := func(a, b geo.LatLon) (float64, bool) {
-		if ctx.Err() != nil {
-			return 0, false
+	// build makes the provider chain. It is rebuilt for every solve, since
+	// Subway and Cached remember times that street routing may change.
+	build := func() travel.Provider {
+		walk := rt.walk
+		if routed != nil {
+			walk = routed
 		}
-		return provider.Duration(a, b, mode)
+		if len(p.Crossings) > 0 {
+			walk = travel.Closures{Inner: walk, Course: thin(track.Points, MaxClosurePoints), Crossings: p.Crossings}
+		}
+		provider := walk
+		if rt.net != nil {
+			provider = &travel.Subway{Net: rt.net, Walk: walk}
+		}
+		return &travel.Cached{Inner: provider}
+	}
+	solve := func(provider travel.Provider) planner.Plan {
+		travelFn := func(a, b geo.LatLon) (float64, bool) {
+			if ctx.Err() != nil {
+				return 0, false
+			}
+			return provider.Duration(a, b, mode)
+		}
+		return planner.Solve(
+			planner.Start{Pos: p.Spectator.Start, Time: p.Spectator.StartTimeSeconds},
+			nodes, travelFn,
+			planner.Params{
+				Buffer: buffer,
+				// A true upper bound on straight-line speed (0 if the provider
+				// cannot give one, which turns the prefilter off).
+				MaxSpeed:    travel.MaxSpeed(provider, mode),
+				MaxStops:    p.MaxStops,
+				StopPenalty: p.StopPenalty,
+			},
+		)
 	}
 
-	plan := planner.Solve(
-		planner.Start{Pos: p.Spectator.Start, Time: p.Spectator.StartTimeSeconds},
-		nodes, travelFn,
-		planner.Params{
-			Buffer: buffer,
-			// A true upper bound on straight-line speed (0 if the provider
-			// cannot give one, which turns the prefilter off).
-			MaxSpeed:    travel.MaxSpeed(provider, mode),
-			MaxStops:    p.MaxStops,
-			StopPenalty: p.StopPenalty,
-		},
-	)
+	// The hybrid: solve on estimates, street route the plan's legs, and
+	// solve again with the routed times (and estimates scaled to match),
+	// until a plan's legs are all routed already. After the last round
+	// Routed is frozen, so describing the legs below routes nothing new
+	// and their steps match the times the plan was solved with.
+	provider := build()
+	plan := solve(provider)
+	for round := 0; routed != nil && round < MaxRouteRounds && ctx.Err() == nil; round++ {
+		describeLegs(provider, p.Spectator.Start, plan.Stops, mode)
+		if routed.TakeNew() == 0 {
+			break
+		}
+		provider = build()
+		plan = solve(provider)
+	}
 	if ctx.Err() != nil {
 		return nil, errors.New("planning took too long; try wider spacing or fewer crossings")
 	}
-	legs := make([][]travel.Step, len(plan.Stops))
-	prev := p.Spectator.Start
-	for i, st := range plan.Stops {
-		steps, ok := travel.Describe(provider, prev, st.Node.Pos, mode)
-		if !ok {
-			steps = []travel.Step{}
-		}
-		legs[i] = steps
-		prev = st.Node.Pos
+	if routed != nil {
+		routed.Freeze()
+	}
+	legs := describeLegs(provider, p.Spectator.Start, plan.Stops, mode)
+	if routed != nil {
+		rt.label += streetsNote(routed, cfg.Streets)
 	}
 	return &Response{
 		Course:     Course{Points: track.Points, Length: track.Length()},
@@ -406,6 +443,49 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		},
 		NoTransit: rt.noTransit,
 	}, nil
+}
+
+// describeLegs breaks each stop's leg into steps, a few legs at a time
+// since describing can street route them.
+func describeLegs(provider travel.Provider, start geo.LatLon, stops []planner.Stop, mode travel.Mode) [][]travel.Step {
+	legs := make([][]travel.Step, len(stops))
+	sem := make(chan struct{}, RouteWorkers)
+	var wg sync.WaitGroup
+	prev := start
+	for i, st := range stops {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, a, b geo.LatLon) {
+			defer func() { <-sem; wg.Done() }()
+			steps, ok := travel.Describe(provider, a, b, mode)
+			if !ok {
+				steps = []travel.Step{}
+			}
+			legs[i] = steps
+		}(i, prev, st.Node.Pos)
+		prev = st.Node.Pos
+	}
+	wg.Wait()
+	return legs
+}
+
+// streetsNote is added to the routing line: credit for the street routes
+// (the ORS terms ask for it), or why there are none.
+func streetsNote(r *travel.Routed, router travel.StreetRouter) string {
+	n, unavailable := r.Status()
+	name := "the street router"
+	if s, ok := router.(fmt.Stringer); ok {
+		name = s.String()
+	}
+	switch {
+	case n > 0 && unavailable:
+		return fmt.Sprintf(". Street routes: %s (some legs are estimates, routing was busy)", name)
+	case n > 0:
+		return fmt.Sprintf(". Street routes: %s", name)
+	case unavailable:
+		return ". Street routing is unavailable right now, so legs are estimates"
+	}
+	return ""
 }
 
 // missedPins returns the pins with no pinned stop within snapping distance.

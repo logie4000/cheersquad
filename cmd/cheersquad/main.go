@@ -32,6 +32,12 @@ func main() {
 		cfg.Walk = &travel.OSRM{BaseURL: *osrmWalk}
 		log.Printf("walking times from OSRM at %s", *osrmWalk)
 	}
+	// The key comes from the environment only, never a flag, so it stays
+	// out of process listings.
+	if key := os.Getenv("ORS_API_KEY"); key != "" {
+		cfg.Streets = &travel.ORS{Key: key}
+		log.Printf("street routes for plan legs from openrouteservice.org")
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.Handler(cfg))

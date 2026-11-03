@@ -1,0 +1,287 @@
+package travel
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/logie4000/cheersquad/internal/geo"
+)
+
+// StreetRoute is one street-by-street route between two points.
+type StreetRoute struct {
+	Seconds float64
+	Meters  float64
+	// Path is the route's geometry from start to end.
+	Path []geo.LatLon
+}
+
+// StreetRouter finds street routes for single legs. It is too slow and
+// rate limited to ask inside the planner's inner loop; Routed asks it only
+// for the legs of a finished plan.
+type StreetRouter interface {
+	Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries bool) (StreetRoute, error)
+}
+
+// ErrNoStreetRoute means the router answered but found no route (a point
+// too far from any road, or no connection without a ferry).
+var ErrNoStreetRoute = errors.New("no street route")
+
+// ErrRouterUnavailable means the router could not be asked: it is down,
+// over its rate limit or daily quota, or rejected the key.
+var ErrRouterUnavailable = errors.New("street routing unavailable")
+
+// ORS routes legs with the OpenRouteService directions API
+// (api.openrouteservice.org). The free plan allows 2,000 directions a day
+// and 40 a minute; ORS stays under both itself, and pauses after errors,
+// so callers fall back to estimates rather than wait.
+type ORS struct {
+	// Key is the API key, sent in the Authorization header.
+	Key string
+	// BaseURL is the API root. Empty means https://api.openrouteservice.org.
+	BaseURL string
+	// Client is the HTTP client. Nil means one with a 10 s timeout.
+	Client *http.Client
+	// PerMinute and PerDay cap requests. Zero means 35 and 1900, a little
+	// under the free plan's limits so other uses of the key still work.
+	PerMinute, PerDay int
+	// MaxMemo caps remembered routes, shared by every request; when full
+	// the memo is cleared. Zero means 5000.
+	MaxMemo int
+
+	mu        sync.Mutex
+	memo      map[orsKey]orsVal
+	recent    []time.Time // request times in the last minute
+	day       string      // UTC date of dayCount
+	dayCount  int
+	downUntil time.Time
+	logged    string // last logged failure, so each is logged once
+}
+
+type orsKey struct {
+	a, b    geo.LatLon
+	m       Mode
+	noFerry bool
+}
+
+type orsVal struct {
+	r  StreetRoute
+	ok bool // false: ErrNoStreetRoute
+}
+
+// orsProfiles maps modes to ORS profiles. Transit has none.
+var orsProfiles = map[Mode]string{
+	Walk:  "foot-walking",
+	Bike:  "cycling-regular",
+	Drive: "driving-car",
+}
+
+// orsRetry is how long ORS is skipped after it fails, so an outage costs
+// one timeout per plan rather than one per leg.
+const orsRetry = time.Minute
+
+func (o *ORS) String() string { return "openrouteservice.org by HeiGIT" }
+
+func (o *ORS) client() *http.Client {
+	if o.Client == nil {
+		return &http.Client{Timeout: 10 * time.Second}
+	}
+	return o.Client
+}
+
+func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries bool) (StreetRoute, error) {
+	profile, ok := orsProfiles[m]
+	if !ok {
+		return StreetRoute{}, fmt.Errorf("ors: no profile for %s", m)
+	}
+	k := orsKey{a, b, m, avoidFerries}
+	o.mu.Lock()
+	v, hit := o.memo[k]
+	o.mu.Unlock()
+	if hit {
+		if !v.ok {
+			return StreetRoute{}, ErrNoStreetRoute
+		}
+		return v.r, nil
+	}
+	if err := o.take(); err != nil {
+		return StreetRoute{}, err
+	}
+	r, err := o.request(ctx, profile, a, b, avoidFerries)
+	switch {
+	case err == nil:
+		o.store(k, orsVal{r, true})
+		return r, nil
+	case errors.Is(err, ErrNoStreetRoute):
+		o.store(k, orsVal{})
+		return StreetRoute{}, err
+	case ctx.Err() != nil:
+		return StreetRoute{}, ErrRouterUnavailable
+	}
+	o.fail(err)
+	return StreetRoute{}, ErrRouterUnavailable
+}
+
+// take claims one request from the minute and day budgets.
+func (o *ORS) take() error {
+	perMin, perDay := o.PerMinute, o.PerDay
+	if perMin <= 0 {
+		perMin = 35
+	}
+	if perDay <= 0 {
+		perDay = 1900
+	}
+	now := time.Now()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if now.Before(o.downUntil) {
+		return ErrRouterUnavailable
+	}
+	if d := now.UTC().Format("2006-01-02"); d != o.day {
+		o.day, o.dayCount = d, 0
+	}
+	if o.dayCount >= perDay {
+		o.logOnce(fmt.Sprintf("ors: daily budget of %d requests used; straight-line estimates until midnight UTC", perDay))
+		return ErrRouterUnavailable
+	}
+	keep := o.recent[:0]
+	for _, t := range o.recent {
+		if now.Sub(t) < time.Minute {
+			keep = append(keep, t)
+		}
+	}
+	o.recent = keep
+	if len(o.recent) >= perMin {
+		return ErrRouterUnavailable
+	}
+	o.recent = append(o.recent, now)
+	o.dayCount++
+	return nil
+}
+
+func (o *ORS) store(k orsKey, v orsVal) {
+	limit := o.MaxMemo
+	if limit <= 0 {
+		limit = 5000
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.memo == nil || len(o.memo) >= limit {
+		o.memo = map[orsKey]orsVal{}
+	}
+	o.memo[k] = v
+}
+
+// fail pauses ORS for a while and logs the error once.
+func (o *ORS) fail(err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.downUntil = time.Now().Add(orsRetry)
+	o.logOnce(fmt.Sprintf("ors: %v; straight-line estimates for a minute", err))
+}
+
+// logOnce logs msg unless it was the last thing logged. The caller holds o.mu.
+func (o *ORS) logOnce(msg string) {
+	if msg != o.logged {
+		o.logged = msg
+		log.Print(msg)
+	}
+}
+
+type orsRequest struct {
+	Coordinates [][2]float64 `json:"coordinates"`
+	Options     *orsOptions  `json:"options,omitempty"`
+}
+
+type orsOptions struct {
+	AvoidFeatures []string `json:"avoid_features"`
+}
+
+type orsResponse struct {
+	Features []struct {
+		Geometry struct {
+			Coordinates [][]float64 `json:"coordinates"`
+		} `json:"geometry"`
+		Properties struct {
+			Summary struct {
+				Distance float64 `json:"distance"`
+				Duration float64 `json:"duration"`
+			} `json:"summary"`
+		} `json:"properties"`
+	} `json:"features"`
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// ORS error codes that mean "no route" rather than a failure: 2009 route
+// not found, 2010 a point not near any road, 2004 the route is too long
+// for the profile.
+var orsNoRoute = map[int]bool{2004: true, 2009: true, 2010: true}
+
+func (o *ORS) request(ctx context.Context, profile string, a, b geo.LatLon, avoidFerries bool) (StreetRoute, error) {
+	body := orsRequest{Coordinates: [][2]float64{{a.Lon, a.Lat}, {b.Lon, b.Lat}}}
+	if avoidFerries {
+		body.Options = &orsOptions{AvoidFeatures: []string{"ferries"}}
+	}
+	buf, _ := json.Marshal(body)
+	base := o.BaseURL
+	if base == "" {
+		base = "https://api.openrouteservice.org"
+	}
+	u := strings.TrimRight(base, "/") + "/v2/directions/" + profile + "/geojson"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
+	if err != nil {
+		return StreetRoute{}, err
+	}
+	req.Header.Set("Authorization", o.Key)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/geo+json, application/json")
+	resp, err := o.client().Do(req)
+	if err != nil {
+		return StreetRoute{}, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return StreetRoute{}, err
+	}
+	var r orsResponse
+	jsonErr := json.Unmarshal(raw, &r)
+	if r.Error != nil && orsNoRoute[r.Error.Code] {
+		return StreetRoute{}, ErrNoStreetRoute
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg := strings.TrimSpace(string(raw))
+		if r.Error != nil {
+			msg = fmt.Sprintf("code %d: %s", r.Error.Code, r.Error.Message)
+		}
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return StreetRoute{}, fmt.Errorf("status %d: %s", resp.StatusCode, msg)
+	}
+	if jsonErr != nil {
+		return StreetRoute{}, jsonErr
+	}
+	if len(r.Features) == 0 {
+		return StreetRoute{}, ErrNoStreetRoute
+	}
+	f := r.Features[0]
+	out := StreetRoute{Seconds: f.Properties.Summary.Duration, Meters: f.Properties.Summary.Distance}
+	for _, c := range f.Geometry.Coordinates {
+		if len(c) >= 2 {
+			out.Path = append(out.Path, geo.LatLon{Lat: c[1], Lon: c[0]})
+		}
+	}
+	return out, nil
+}
