@@ -3,6 +3,7 @@ package travel
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 
 	"github.com/logie4000/cheersquad/internal/geo"
@@ -48,12 +49,26 @@ type Routed struct {
 	known  map[cacheKey]StreetRoute // adjusted routes by leg
 	tried  map[cacheKey]bool        // asked and fell back to the estimate
 	fresh  int                      // legs routed since the last TakeNew
-	failed bool                     // the router was unavailable at least once
-	// sums[m] is the routed seconds (before the adjustment's overhead) and
-	// estimated seconds of every routed leg in mode m, whose ratio scales
+	stats  RoutedStats
+	// ratios[m] is routed seconds (before the adjustment's overhead) over
+	// estimated seconds for every routed leg in mode m; their median scales
 	// unrouted estimates.
-	sums map[Mode][2]float64
+	ratios map[Mode][]float64
 }
+
+// RoutedStats counts what happened to the legs Routed asked about.
+type RoutedStats struct {
+	Routed      int // got a street route
+	NoRoute     int // the router found none
+	Unavailable int // the router was down, busy or over budget
+}
+
+// Scale limits: one odd leg (a ferry across a river the estimate walks
+// over, a bridge far upstream) must not make every estimate wildly off.
+const (
+	minScale = 0.75
+	maxScale = 2.0
+)
 
 // Freeze stops Steps routing new legs: from now on they use the estimate,
 // so a last solve and its description agree.
@@ -74,8 +89,8 @@ func (r *Routed) TakeNew() int {
 }
 
 // Scale is how much slower (above 1) or faster routed legs in mode m were
-// than their estimates, overall, leaving out the race-day overhead; 1
-// before any are routed.
+// than their estimates (the median, between 0.75 and 2), leaving out the
+// race-day overhead; 1 before any are routed.
 func (r *Routed) Scale(m Mode) float64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -83,11 +98,18 @@ func (r *Routed) Scale(m Mode) float64 {
 }
 
 func (r *Routed) scale(m Mode) float64 {
-	s := r.sums[m]
-	if s[0] <= 0 || s[1] <= 0 {
+	rs := r.ratios[m]
+	if len(rs) == 0 {
 		return 1
 	}
-	return s[0] / s[1]
+	sorted := append([]float64(nil), rs...)
+	sort.Float64s(sorted)
+	n := len(sorted)
+	med := sorted[n/2]
+	if n%2 == 0 {
+		med = (sorted[n/2-1] + sorted[n/2]) / 2
+	}
+	return min(maxScale, max(minScale, med))
 }
 
 // estimated turns an estimate into what the street route would likely
@@ -95,18 +117,17 @@ func (r *Routed) scale(m Mode) float64 {
 // routed (before that the estimate stands, as it already allows for
 // parking and the like). The caller holds r.mu.
 func (r *Routed) estimated(s float64, m Mode) float64 {
-	if _, seen := r.sums[m]; !seen {
+	if len(r.ratios[m]) == 0 {
 		return s
 	}
 	return s*r.scale(m) + r.adjust(m).Overhead
 }
 
-// Status reports how many legs have street routes and whether the router
-// was unavailable for any.
-func (r *Routed) Status() (routed int, unavailable bool) {
+// Stats reports what happened to the legs asked about so far.
+func (r *Routed) Stats() RoutedStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.known), r.failed
+	return r.stats
 }
 
 func (r *Routed) adjust(m Mode) RaceDayAdjust {
@@ -165,7 +186,7 @@ func (r *Routed) estimateSteps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, seen := r.sums[m]; !seen {
+	if len(r.ratios[m]) == 0 {
 		return steps, ok
 	}
 	sc := r.scale(m)
@@ -193,8 +214,10 @@ func (r *Routed) route(k cacheKey) (StreetRoute, bool) {
 			r.tried = map[cacheKey]bool{}
 		}
 		r.tried[k] = true
-		if errors.Is(err, ErrRouterUnavailable) {
-			r.failed = true
+		if errors.Is(err, ErrNoStreetRoute) {
+			r.stats.NoRoute++
+		} else {
+			r.stats.Unavailable++
 		}
 		return StreetRoute{}, false
 	}
@@ -206,12 +229,12 @@ func (r *Routed) route(k cacheKey) (StreetRoute, bool) {
 	}
 	r.known[k] = sr
 	r.fresh++
+	r.stats.Routed++
 	if estOK && est > 0 {
-		if r.sums == nil {
-			r.sums = map[Mode][2]float64{}
+		if r.ratios == nil {
+			r.ratios = map[Mode][]float64{}
 		}
-		s := r.sums[k.m]
-		r.sums[k.m] = [2]float64{s[0] + raw, s[1] + est}
+		r.ratios[k.m] = append(r.ratios[k.m], raw/est)
 	}
 	return sr, true
 }
