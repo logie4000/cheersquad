@@ -14,6 +14,7 @@ import {
   legSteps,
   lineColor,
   MapMarks,
+  mapsPinLink,
   parseClock,
   parseGpxPoints,
   PlanForm,
@@ -21,6 +22,7 @@ import {
   Race,
   Step,
   stepDetail,
+  stepDirectionsLink,
   stepText,
   textOn,
 } from './plan';
@@ -391,6 +393,10 @@ export class App implements OnInit {
     return bg ? textOn(bg) : null;
   }
   mapsLink(p: LatLon): string {
-    return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+    return mapsPinLink(p);
+  }
+  /** Directions in Google Maps for one step of a leg. */
+  stepLink(s: Step): string {
+    return stepDirectionsLink(s);
   }
 }

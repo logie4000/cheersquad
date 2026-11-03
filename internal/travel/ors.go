@@ -85,8 +85,25 @@ var orsProfiles = map[Mode]string{
 }
 
 // orsRetry is how long ORS is skipped after it fails, so an outage costs
-// one timeout per plan rather than one per leg.
-const orsRetry = time.Minute
+// one timeout per plan rather than one per leg. After a 429 (too many
+// requests) the pause is only orsRateBackoff, and requests wait it out.
+// (Variables so tests can shorten them.)
+var (
+	orsRetry       = time.Minute
+	orsRateBackoff = 10 * time.Second
+	// orsMaxWait is the longest one request waits for a free slot in the
+	// minute budget (or the end of a 429 pause), and only while the
+	// plan's deadline leaves time to spare.
+	orsMaxWait = 10 * time.Second
+)
+
+// orsStatusError is an HTTP error from ORS.
+type orsStatusError struct {
+	code int
+	msg  string
+}
+
+func (e *orsStatusError) Error() string { return fmt.Sprintf("status %d: %s", e.code, e.msg) }
 
 func (o *ORS) String() string { return "openrouteservice.org by HeiGIT" }
 
@@ -112,10 +129,20 @@ func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries b
 		}
 		return v.r, nil
 	}
-	if err := o.take(); err != nil {
-		return StreetRoute{}, err
+	var r StreetRoute
+	var err error
+	for attempt := 0; ; attempt++ {
+		if err := o.take(ctx); err != nil {
+			return StreetRoute{}, err
+		}
+		r, err = o.request(ctx, profile, a, b, avoidFerries)
+		var se *orsStatusError
+		if attempt == 0 && errors.As(err, &se) && se.code == http.StatusTooManyRequests {
+			o.backOff()
+			continue // take waits out the pause if the deadline allows
+		}
+		break
 	}
-	r, err := o.request(ctx, profile, a, b, avoidFerries)
 	switch {
 	case err == nil:
 		o.store(k, orsVal{r, true})
@@ -130,8 +157,11 @@ func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries b
 	return StreetRoute{}, ErrRouterUnavailable
 }
 
-// take claims one request from the minute and day budgets.
-func (o *ORS) take() error {
+// take claims one request from the minute and day budgets. When the
+// minute budget is spent, or ORS asked us to slow down, it waits for a
+// slot, up to orsMaxWait and only if ctx's deadline leaves a few seconds
+// after that for the request; otherwise the leg keeps its estimate.
+func (o *ORS) take(ctx context.Context) error {
 	perMin, perDay := o.PerMinute, o.PerDay
 	if perMin <= 0 {
 		perMin = 35
@@ -139,18 +169,41 @@ func (o *ORS) take() error {
 	if perDay <= 0 {
 		perDay = 1900
 	}
+	for {
+		wait, err := o.tryTake(perMin, perDay)
+		if err != nil || wait == 0 {
+			return err
+		}
+		if wait > orsMaxWait {
+			return ErrRouterUnavailable
+		}
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait+2*time.Second {
+			return ErrRouterUnavailable
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ErrRouterUnavailable
+		case <-t.C:
+		}
+	}
+}
+
+// tryTake claims a request now, or says how long until one may be.
+func (o *ORS) tryTake(perMin, perDay int) (time.Duration, error) {
 	now := time.Now()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if now.Before(o.downUntil) {
-		return ErrRouterUnavailable
-	}
 	if d := now.UTC().Format("2006-01-02"); d != o.day {
 		o.day, o.dayCount = d, 0
 	}
 	if o.dayCount >= perDay {
 		o.logOnce(fmt.Sprintf("ors: daily budget of %d requests used; straight-line estimates until midnight UTC", perDay))
-		return ErrRouterUnavailable
+		return 0, ErrRouterUnavailable
+	}
+	if now.Before(o.downUntil) {
+		return o.downUntil.Sub(now), nil
 	}
 	keep := o.recent[:0]
 	for _, t := range o.recent {
@@ -160,11 +213,21 @@ func (o *ORS) take() error {
 	}
 	o.recent = keep
 	if len(o.recent) >= perMin {
-		return ErrRouterUnavailable
+		return o.recent[0].Add(time.Minute).Sub(now) + 10*time.Millisecond, nil
 	}
 	o.recent = append(o.recent, now)
 	o.dayCount++
-	return nil
+	return 0, nil
+}
+
+// backOff pauses requests briefly after ORS said 429.
+func (o *ORS) backOff() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if until := time.Now().Add(orsRateBackoff); until.After(o.downUntil) {
+		o.downUntil = until
+	}
+	o.logOnce("ors: status 429 (too many requests); waiting a few seconds")
 }
 
 func (o *ORS) store(k orsKey, v orsVal) {
@@ -268,7 +331,7 @@ func (o *ORS) request(ctx context.Context, profile string, a, b geo.LatLon, avoi
 		if len(msg) > 200 {
 			msg = msg[:200]
 		}
-		return StreetRoute{}, fmt.Errorf("status %d: %s", resp.StatusCode, msg)
+		return StreetRoute{}, &orsStatusError{resp.StatusCode, msg}
 	}
 	if jsonErr != nil {
 		return StreetRoute{}, jsonErr

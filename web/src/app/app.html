@@ -271,9 +271,15 @@
                               [style.background-color]="lineBg(st)"
                               [style.color]="lineFg(st)"
                               >{{ st.line || 'Subway' }}</span
-                            >
+                            >{{ ' ' }}
                           }
-                          {{ stepDetail(st) }}
+                          <a
+                            [href]="stepLink(st)"
+                            target="_blank"
+                            rel="noopener"
+                            title="Directions in Google Maps"
+                            >{{ stepDetail(st) }}</a
+                          >
                         </li>
                       }
                     </ol>

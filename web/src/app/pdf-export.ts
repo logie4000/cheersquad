@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { LEG, TILE_ATTRIBUTION, TILE_URL, WALK } from './course-map';
-import { LatLon, lineColor, Step, stepDetail, Stop, textOn } from './plan';
+import { LatLon, lineColor, Step, stepDetail, stepDirectionsLink, Stop, textOn } from './plan';
 
 // A downloadable PDF of the plan, drawn without the browser's print dialog:
 // the map is painted onto a canvas from OSM tiles plus our own course, legs
@@ -434,6 +434,8 @@ interface StepPart {
   kind: 'badge' | 'text' | 'sep';
   text: string;
   width: number;
+  /** Google Maps directions for the step, on its text. */
+  url?: string;
   bg?: string;
   fg?: string;
 }
@@ -469,7 +471,12 @@ export function layoutSteps(doc: Doc, steps: Step[], width: number): StepLine[] 
       chunk.push({ kind: 'badge', text: label, width: w, bg, fg: textOn(bg) });
     }
     const detail = pdfText(stepDetail(st));
-    chunk.push({ kind: 'text', text: detail, width: textWidth(doc, detail, STEP_SIZE) });
+    chunk.push({
+      kind: 'text',
+      text: detail,
+      width: textWidth(doc, detail, STEP_SIZE),
+      url: stepDirectionsLink(st),
+    });
     const total = chunk.reduce((a, p) => a + p.width + GAP, 0) - GAP;
     // Start a step on a new line when it won't fit; a separator never leads a line.
     if (x > 0 && x + total > width) {
@@ -503,8 +510,12 @@ function drawSteps(doc: Doc, lines: StepLine[], left: number, top: number): void
         doc.setFont('helvetica', 'bold').setFontSize(BADGE_SIZE).setTextColor(p.fg!);
         doc.text(p.text, x + p.width / 2, mid, { align: 'center', baseline: 'middle' });
       } else {
-        doc.setFont('helvetica', 'normal').setFontSize(STEP_SIZE).setTextColor(MUTED);
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(STEP_SIZE)
+          .setTextColor(p.url ? ACCENT : MUTED);
         doc.text(p.text, x, mid, { baseline: 'middle' });
+        if (p.url) doc.link(x, mid - STEP_LINE / 2, p.width, STEP_LINE, { url: p.url });
       }
     });
   });

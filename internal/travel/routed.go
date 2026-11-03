@@ -202,10 +202,11 @@ func (r *Routed) route(k cacheKey) (StreetRoute, bool) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if ctx.Err() != nil {
-		return StreetRoute{}, false
+	var sr StreetRoute
+	err := ErrRouterUnavailable // out of time for street routing
+	if ctx.Err() == nil {
+		sr, err = r.Router.Route(ctx, k.a, k.b, k.m, r.AvoidFerries)
 	}
-	sr, err := r.Router.Route(ctx, k.a, k.b, k.m, r.AvoidFerries)
 	est, estOK := r.Estimate.Duration(k.a, k.b, k.m)
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -109,6 +109,40 @@ export const METERS_PER_MILE = 1609.344;
 export type DistanceUnit = 'mi' | 'km';
 
 /** Meters in one of the given unit. */
+/** Google Maps travel modes for directions links. */
+const GOOGLE_MODE: Record<Mode, string> = {
+  walk: 'walking',
+  bike: 'bicycling',
+  transit: 'transit',
+  drive: 'driving',
+};
+
+/** A Google Maps pin at p. Plain links need no API key. */
+export function mapsPinLink(p: LatLon): string {
+  return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+}
+
+/** Google Maps directions from a to b in mode m. */
+export function mapsDirectionsLink(a: LatLon, b: LatLon, m: Mode): string {
+  return (
+    'https://www.google.com/maps/dir/?api=1' +
+    `&origin=${a.lat},${a.lon}&destination=${b.lat},${b.lon}&travelmode=${GOOGLE_MODE[m]}`
+  );
+}
+
+const STEP_MODE: Record<StepKind, Mode> = {
+  walk: 'walk',
+  bike: 'bike',
+  drive: 'drive',
+  subway: 'transit',
+  transit: 'transit',
+};
+
+/** Google Maps directions for one step of a leg, in that step's own mode. */
+export function stepDirectionsLink(s: Step): string {
+  return mapsDirectionsLink(s.fromPos, s.toPos, STEP_MODE[s.kind] ?? 'walk');
+}
+
 export function unitMeters(u: DistanceUnit): number {
   return u === 'km' ? 1000 : METERS_PER_MILE;
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/logie4000/cheersquad/internal/geo"
 )
@@ -89,10 +90,10 @@ func TestORSRoute(t *testing.T) {
 	}
 }
 
-// A 429 (or any failure) pauses ORS, so the next legs fall back at once.
+// A failure pauses ORS, so the next legs fall back at once.
 func TestORSPausesAfterFailure(t *testing.T) {
 	var hits int32
-	status := int32(http.StatusTooManyRequests)
+	status := int32(http.StatusBadGateway)
 	srv := fakeORS(t, &hits, &status)
 	defer srv.Close()
 	o := &ORS{Key: "k3y", BaseURL: srv.URL}
@@ -108,15 +109,60 @@ func TestORSPausesAfterFailure(t *testing.T) {
 	}
 }
 
+// A 429 pauses briefly and the request is tried again, if the deadline
+// leaves time for it.
+func TestORSWaitsOutRateLimit(t *testing.T) {
+	defer func(b time.Duration) { orsRateBackoff = b }(orsRateBackoff)
+	orsRateBackoff = 50 * time.Millisecond
+	var hits int32
+	status := int32(http.StatusTooManyRequests)
+	srv := fakeORS(t, &hits, &status)
+	defer srv.Close()
+	o := &ORS{Key: "k3y", BaseURL: srv.URL}
+	a, b := geo.LatLon{}, geo.LatLon{Lat: 0.01}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		atomic.StoreInt32(&status, 0) // ORS lets us back in
+	}()
+	if _, err := o.Route(context.Background(), a, b, Walk, false); err != nil || hits != 2 {
+		t.Fatalf("err %v after %d requests, want a route on the retry", err, hits)
+	}
+	// Too close to the deadline to wait: fall back at once.
+	atomic.StoreInt32(&status, http.StatusTooManyRequests)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	orsRateBackoff = 10 * time.Second
+	start := time.Now()
+	if _, err := o.Route(ctx, a, geo.LatLon{Lat: 0.02}, Walk, false); !errors.Is(err, ErrRouterUnavailable) || time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("err %v after %v", err, time.Since(start))
+	}
+}
+
+// With the minute budget spent, a request waits for a slot.
+func TestORSWaitsForSlot(t *testing.T) {
+	var hits, status int32
+	srv := fakeORS(t, &hits, &status)
+	defer srv.Close()
+	o := &ORS{Key: "k3y", BaseURL: srv.URL, PerMinute: 1}
+	o.recent = []time.Time{time.Now().Add(-time.Minute + 50*time.Millisecond)}
+	o.day = time.Now().UTC().Format("2006-01-02")
+	if _, err := o.Route(context.Background(), geo.LatLon{}, geo.LatLon{Lat: 0.01}, Walk, false); err != nil || hits != 1 {
+		t.Fatalf("err %v after %d requests", err, hits)
+	}
+}
+
 func TestORSBudget(t *testing.T) {
 	var hits, status int32
 	srv := fakeORS(t, &hits, &status)
 	defer srv.Close()
 	o := &ORS{Key: "k3y", BaseURL: srv.URL, PerMinute: 2}
 	a := geo.LatLon{Lat: 0, Lon: 0}
+	// A deadline too close to wait a minute for the next slot.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	var errs []error
 	for i := 0; i < 3; i++ {
-		_, err := o.Route(context.Background(), a, geo.LatLon{Lat: 0.01 * float64(i+1), Lon: 0}, Walk, false)
+		_, err := o.Route(ctx, a, geo.LatLon{Lat: 0.01 * float64(i+1), Lon: 0}, Walk, false)
 		errs = append(errs, err)
 	}
 	if errs[0] != nil || errs[1] != nil || !errors.Is(errs[2], ErrRouterUnavailable) || hits != 2 {
