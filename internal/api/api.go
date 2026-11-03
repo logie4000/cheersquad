@@ -84,6 +84,10 @@ const (
 	// again over just its own spots, so it ends up on street-routed legs
 	// rather than chasing new spots whose legs are still estimates.
 	MaxRepairRounds = 3
+	// StreetsTimeout caps the time a plan spends street routing, waits
+	// for the router's rate limit included; legs not routed by then keep
+	// their estimates.
+	StreetsTimeout = 15 * time.Second
 	// RouteWorkers is how many legs are street routed at once.
 	RouteWorkers = 4
 )
@@ -356,7 +360,11 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	}
 	var routed *travel.Routed
 	if cfg.Streets != nil {
-		routed = &travel.Routed{Estimate: rt.walk, Router: cfg.Streets, AvoidFerries: p.Spectator.AvoidFerries, Ctx: ctx}
+		// Street routing gets its own, shorter deadline: when the router
+		// is busy the plan comes back on estimates rather than late.
+		streetsCtx, cancel := context.WithTimeout(ctx, StreetsTimeout)
+		defer cancel()
+		routed = &travel.Routed{Estimate: rt.walk, Router: cfg.Streets, AvoidFerries: p.Spectator.AvoidFerries, Ctx: streetsCtx}
 	}
 	if pf, ok := rt.walk.(travel.Prefetcher); ok {
 		pts := []geo.LatLon{p.Spectator.Start}
