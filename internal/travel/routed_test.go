@@ -54,7 +54,7 @@ func TestRoutedPinsRoutedTimes(t *testing.T) {
 	// Other legs' estimates scale by how the routed one compared.
 	c := geo.LatLon{Lat: 0.02}
 	estC, _ := Haversine{}.Duration(a, c, Walk)
-	scale := 2 * d * 1.07 / est // routed seconds over estimated
+	scale := min(2, 2*d*1.07/est) // routed over estimated seconds, capped at 2
 	if s, _ := r.Duration(a, c, Walk); math.Abs(s-estC*scale) > 1e-6 {
 		t.Fatalf("unrouted leg %f, want %f scaled by %f", s, estC, scale)
 	}
@@ -100,8 +100,12 @@ func TestRoutedFallsBack(t *testing.T) {
 			t.Fatalf("%v: %+v", err, steps)
 		}
 		r.Steps(a, b, Walk)
-		if n, unavailable := r.Status(); n != 0 || unavailable != (err == ErrRouterUnavailable) || sr.calls != 1 {
-			t.Fatalf("%v: status %d %v after %d calls", err, n, unavailable, sr.calls)
+		want := RoutedStats{NoRoute: 1}
+		if err == ErrRouterUnavailable {
+			want = RoutedStats{Unavailable: 1}
+		}
+		if got := r.Stats(); got != want || sr.calls != 1 {
+			t.Fatalf("%v: stats %+v after %d calls", err, got, sr.calls)
 		}
 	}
 	// Transit is never street routed.
@@ -110,5 +114,19 @@ func TestRoutedFallsBack(t *testing.T) {
 	r.Steps(a, b, Transit)
 	if sr.calls != 0 {
 		t.Fatal("transit leg was street routed")
+	}
+}
+
+// One leg far faster than its estimate (a ferry over a river the estimate
+// walks across) must not speed up every other estimate.
+func TestRoutedScaleIgnoresOddLeg(t *testing.T) {
+	r := &Routed{Estimate: Haversine{}}
+	r.ratios = map[Mode][]float64{Walk: {1.1, 1.2, 0.2}}
+	if s := r.Scale(Walk); s != 1.1 {
+		t.Fatalf("scale %f, want the median 1.1", s)
+	}
+	r.ratios[Walk] = []float64{0.1}
+	if s := r.Scale(Walk); s != minScale {
+		t.Fatalf("scale %f, want the floor %f", s, minScale)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -79,6 +80,10 @@ const (
 	// the plan solved again with the routed times. Each round costs a
 	// router request for each leg not yet routed (more for transit).
 	MaxRouteRounds = 3
+	// MaxRepairRounds is how many times, after those, the plan is solved
+	// again over just its own spots, so it ends up on street-routed legs
+	// rather than chasing new spots whose legs are still estimates.
+	MaxRepairRounds = 3
 	// RouteWorkers is how many legs are street routed at once.
 	RouteWorkers = 4
 )
@@ -382,7 +387,7 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		}
 		return &travel.Cached{Inner: provider}
 	}
-	solve := func(provider travel.Provider) planner.Plan {
+	solve := func(provider travel.Provider, nodes []candidates.Node) planner.Plan {
 		travelFn := func(a, b geo.LatLon) (float64, bool) {
 			if ctx.Err() != nil {
 				return 0, false
@@ -405,18 +410,31 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 
 	// The hybrid: solve on estimates, street route the plan's legs, and
 	// solve again with the routed times (and estimates scaled to match),
-	// until a plan's legs are all routed already. After the last round
-	// Routed is frozen, so describing the legs below routes nothing new
-	// and their steps match the times the plan was solved with.
+	// until a plan's legs are all routed already. After MaxRouteRounds the
+	// solves keep to the current plan's spots, so the plan settles on
+	// routed legs instead of moving to spots whose legs are estimates.
+	// Routed is then frozen, so describing the legs below routes nothing
+	// new and their steps match the times the plan was solved with.
 	provider := build()
-	plan := solve(provider)
-	for round := 0; routed != nil && round < MaxRouteRounds && ctx.Err() == nil; round++ {
+	plan := solve(provider, nodes)
+	rounds := 0
+	for routed != nil && rounds < MaxRouteRounds+MaxRepairRounds && ctx.Err() == nil {
 		describeLegs(provider, p.Spectator.Start, plan.Stops, mode)
 		if routed.TakeNew() == 0 {
 			break
 		}
+		rounds++
+		among := nodes
+		if rounds > MaxRouteRounds {
+			// Repair: keep to the plan's own spots, dropping any its routed
+			// legs no longer reach in time.
+			among = make([]candidates.Node, len(plan.Stops))
+			for i, st := range plan.Stops {
+				among[i] = st.Node
+			}
+		}
 		provider = build()
-		plan = solve(provider)
+		plan = solve(provider, among)
 	}
 	if ctx.Err() != nil {
 		return nil, errors.New("planning took too long; try wider spacing or fewer crossings")
@@ -426,7 +444,10 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	}
 	legs := describeLegs(provider, p.Spectator.Start, plan.Stops, mode)
 	if routed != nil {
-		rt.label += streetsNote(routed, cfg.Streets)
+		st, left := routed.Stats(), estimatedLegs(legs)
+		log.Printf("streets: %s plan, %d stops, %d re-plans: %d legs routed, %d no route, %d router busy; %d legs left as estimates",
+			mode, len(plan.Stops), rounds, st.Routed, st.NoRoute, st.Unavailable, left)
+		rt.label = streetsLabel(rt.label, st, left, cfg.Streets)
 	}
 	return &Response{
 		Course:     Course{Points: track.Points, Length: track.Length()},
@@ -469,23 +490,57 @@ func describeLegs(provider travel.Provider, start geo.LatLon, stops []planner.St
 	return legs
 }
 
-// streetsNote is added to the routing line: credit for the street routes
-// (the ORS terms ask for it), or why there are none.
-func streetsNote(r *travel.Routed, router travel.StreetRouter) string {
-	n, unavailable := r.Status()
+// estimatedLegs counts the walking, biking and driving steps that have no
+// street path (and go somewhere), so they are drawn as straight lines.
+func estimatedLegs(legs [][]travel.Step) int {
+	n := 0
+	for _, leg := range legs {
+		for _, st := range leg {
+			switch st.Kind {
+			case travel.StepWalk, travel.StepBike, travel.StepDrive:
+				if len(st.Path) < 2 && st.FromPos != st.ToPos {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+
+// streetsLabel rewrites the routing line once legs are street routed:
+// "Walking: street routes from openrouteservice.org by HeiGIT" (the ORS
+// terms ask for the credit), and how many legs are still estimates.
+func streetsLabel(label string, st travel.RoutedStats, left int, router travel.StreetRouter) string {
 	name := "the street router"
 	if s, ok := router.(fmt.Stringer); ok {
 		name = s.String()
 	}
-	switch {
-	case n > 0 && unavailable:
-		return fmt.Sprintf(". Street routes: %s (some legs are estimates, routing was busy)", name)
-	case n > 0:
-		return fmt.Sprintf(". Street routes: %s", name)
-	case unavailable:
-		return ". Street routing is unavailable right now, so legs are estimates"
+	if st.Routed == 0 {
+		if st.Unavailable > 0 {
+			return label + ". Street routing is unavailable right now, so legs are estimates"
+		}
+		return label
 	}
-	return ""
+	routes := "street routes from " + name
+	note := strings.Replace(label, "straight-line estimate", routes, 1)
+	if note == label {
+		note = strings.Replace(label, "Straight-line estimate", strings.ToUpper(routes[:1])+routes[1:], 1)
+	}
+	if note == label {
+		note = label + ". " + strings.ToUpper(routes[:1]) + routes[1:]
+	}
+	if left > 0 {
+		why := ""
+		if st.Unavailable > 0 {
+			why = ", routing was busy"
+		}
+		what := fmt.Sprintf("%d legs are straight-line estimates", left)
+		if left == 1 {
+			what = "1 leg is a straight-line estimate"
+		}
+		note += " (" + what + why + ")"
+	}
+	return note
 }
 
 // missedPins returns the pins with no pinned stop within snapping distance.

@@ -522,7 +522,7 @@ func TestPlanStreetRoutesSlowerLegs(t *testing.T) {
 	estimate := planWalk(t)
 	router := &factorRouter{Factor: 1.3 / 1.0} // 1 m/s on the street, vs 1.3 m/s over 1.3x
 	resp := planStreets(t, router, "walk")
-	if !strings.Contains(resp.Routing, "Street routes: test router") {
+	if resp.Routing != "Walking: street routes from test router" {
 		t.Fatalf("routing %q", resp.Routing)
 	}
 	if !router.ferry {
@@ -583,5 +583,24 @@ func TestPlanStreetRoutesTransitWalks(t *testing.T) {
 	}
 	if router.calls == 0 {
 		t.Fatal("no walking part was routed")
+	}
+}
+
+func TestStreetsLabel(t *testing.T) {
+	r := &factorRouter{}
+	for _, c := range []struct {
+		label string
+		st    travel.RoutedStats
+		left  int
+		want  string
+	}{
+		{"Straight-line estimate", travel.RoutedStats{Routed: 3}, 0, "Street routes from test router"},
+		{"Walking: straight-line estimate", travel.RoutedStats{Routed: 3, NoRoute: 1}, 1, "Walking: street routes from test router (1 leg is a straight-line estimate)"},
+		{"Walking: straight-line estimate", travel.RoutedStats{Routed: 3, Unavailable: 2}, 2, "Walking: street routes from test router (2 legs are straight-line estimates, routing was busy)"},
+		{"Walking: straight-line estimate", travel.RoutedStats{Unavailable: 2}, 2, "Walking: straight-line estimate. Street routing is unavailable right now, so legs are estimates"},
+	} {
+		if got := streetsLabel(c.label, c.st, c.left, r); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
 	}
 }
