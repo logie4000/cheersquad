@@ -34,13 +34,13 @@ These mirror sweat-equity's steps (its `docs/deploy-denali.md`) with
 3. **Instance role** (Denali's): make sure its ECR pull policy also covers
    `repository/cheersquad-*` (skip this if it isn't scoped to other apps'
    prefixes). For street routes it also needs `ssm:GetParameter` on
-   `arn:aws:ssm:<region>:<account>:parameter/cheersquad/*` (and
+   `arn:aws:ssm:<region>:<account>:parameter/webapp/cheersquad/*` (and
    `kms:Decrypt` if the parameter uses a customer-managed key; the default
    `aws/ssm` key needs nothing extra).
 4. **OpenRouteService key** (optional, for street routes): sign up at
    [openrouteservice.org](https://openrouteservice.org/dev/#/signup), copy
    the free key, and store it once:
-   `aws ssm put-parameter --name /cheersquad/ORS_API_KEY --type SecureString --value '<key>'`.
+   `aws ssm put-parameter --name /webapp/cheersquad/ORS_API_KEY --type SecureString --value '<key>'`.
    Every deploy reads it into `.env`. Without it plans use straight-line
    estimates.
 
