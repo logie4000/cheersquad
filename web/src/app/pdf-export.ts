@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { LEG, TILE_ATTRIBUTION, TILE_URL, WALK } from './course-map';
-import { LatLon, lineColor, Step, stepDetail, Stop, textOn } from './plan';
+import { LatLon, lineColor, Step, stepDetail, stepDirectionsLink, Stop, textOn } from './plan';
 
 // A downloadable PDF of the plan, drawn without the browser's print dialog:
 // the map is painted onto a canvas from OSM tiles plus our own course, legs
@@ -24,8 +24,7 @@ export interface PdfPlan {
   heading: string;
   routing?: string;
   columns: string[];
-  /** link opens the spot in Google Maps; directions, the way there from the previous stop. */
-  rows: { cells: string[]; link?: string; directions?: string; steps?: Step[] }[];
+  rows: { cells: string[]; link?: string; steps?: Step[] }[];
   /** A last, muted row with the runner's expected finish; not a sighting. */
   finish?: string[];
   note: string;
@@ -343,13 +342,11 @@ export class PlanPdf {
     const stepWidth = MAP_W - FIRST_COL - 2 * PAD;
     const body: { content: string; colSpan?: number; styles?: object }[][] = [];
     const links: (string | undefined)[] = [];
-    const directions: (string | undefined)[] = [];
     const ruled: boolean[] = [];
     const stepRows: (StepLine[] | undefined)[] = [];
     for (const r of plan.rows) {
       body.push(r.cells.map((c) => ({ content: pdfText(c) })));
       links.push(r.link);
-      directions.push(r.directions);
       const steps = r.steps?.length ? layoutSteps(doc, r.steps, stepWidth) : undefined;
       ruled.push(!steps);
       stepRows.push(undefined);
@@ -363,7 +360,6 @@ export class PlanPdf {
           },
         ]);
         links.push(undefined);
-        directions.push(undefined);
         ruled.push(true);
         stepRows.push(steps);
       }
@@ -378,7 +374,6 @@ export class PlanPdf {
         ...rest.map((c) => ({ content: pdfText(c) })),
       ]);
       links.push(undefined);
-      directions.push(undefined);
       ruled.push(false);
       stepRows.push(undefined);
     }
@@ -405,10 +400,8 @@ export class PlanPdf {
           d.cell.styles.lineWidth = { bottom: 0.5 };
           d.cell.styles.lineColor = BORDER;
         }
-        // The distance links to the spot in Google Maps and the arrival
-        // time to directions there, as on screen.
+        // The distance links to Google Maps, as on screen.
         if (d.column.index === 1 && links[d.row.index]) d.cell.styles.textColor = ACCENT;
-        if (d.column.index === 3 && directions[d.row.index]) d.cell.styles.textColor = ACCENT;
         if (d.row.index === finishRow) {
           d.cell.styles.textColor = MUTED;
           d.cell.styles.fontStyle = 'italic';
@@ -416,9 +409,7 @@ export class PlanPdf {
       },
       didDrawCell: (d) => {
         if (d.section !== 'body') return;
-        const url =
-          (d.column.index === 1 && links[d.row.index]) ||
-          (d.column.index === 3 && directions[d.row.index]);
+        const url = d.column.index === 1 && links[d.row.index];
         if (url) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
         const steps = d.column.index === 1 && stepRows[d.row.index];
         if (steps) drawSteps(doc, steps, d.cell.x + PAD, d.cell.y);
@@ -443,6 +434,8 @@ interface StepPart {
   kind: 'badge' | 'text' | 'sep';
   text: string;
   width: number;
+  /** Google Maps directions for the step, on its text. */
+  url?: string;
   bg?: string;
   fg?: string;
 }
@@ -478,7 +471,12 @@ export function layoutSteps(doc: Doc, steps: Step[], width: number): StepLine[] 
       chunk.push({ kind: 'badge', text: label, width: w, bg, fg: textOn(bg) });
     }
     const detail = pdfText(stepDetail(st));
-    chunk.push({ kind: 'text', text: detail, width: textWidth(doc, detail, STEP_SIZE) });
+    chunk.push({
+      kind: 'text',
+      text: detail,
+      width: textWidth(doc, detail, STEP_SIZE),
+      url: stepDirectionsLink(st),
+    });
     const total = chunk.reduce((a, p) => a + p.width + GAP, 0) - GAP;
     // Start a step on a new line when it won't fit; a separator never leads a line.
     if (x > 0 && x + total > width) {
@@ -512,8 +510,12 @@ function drawSteps(doc: Doc, lines: StepLine[], left: number, top: number): void
         doc.setFont('helvetica', 'bold').setFontSize(BADGE_SIZE).setTextColor(p.fg!);
         doc.text(p.text, x + p.width / 2, mid, { align: 'center', baseline: 'middle' });
       } else {
-        doc.setFont('helvetica', 'normal').setFontSize(STEP_SIZE).setTextColor(MUTED);
+        doc
+          .setFont('helvetica', 'normal')
+          .setFontSize(STEP_SIZE)
+          .setTextColor(p.url ? ACCENT : MUTED);
         doc.text(p.text, x, mid, { baseline: 'middle' });
+        if (p.url) doc.link(x, mid - STEP_LINE / 2, p.width, STEP_LINE, { url: p.url });
       }
     });
   });

@@ -130,6 +130,19 @@ export function mapsDirectionsLink(a: LatLon, b: LatLon, m: Mode): string {
   );
 }
 
+const STEP_MODE: Record<StepKind, Mode> = {
+  walk: 'walk',
+  bike: 'bike',
+  drive: 'drive',
+  subway: 'transit',
+  transit: 'transit',
+};
+
+/** Google Maps directions for one step of a leg, in that step's own mode. */
+export function stepDirectionsLink(s: Step): string {
+  return mapsDirectionsLink(s.fromPos, s.toPos, STEP_MODE[s.kind] ?? 'walk');
+}
+
 export function unitMeters(u: DistanceUnit): number {
   return u === 'km' ? 1000 : METERS_PER_MILE;
 }

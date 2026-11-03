@@ -1,6 +1,7 @@
 import {
   mapsDirectionsLink,
   mapsPinLink,
+  stepDirectionsLink,
   buildParams,
   compactGpx,
   formatClock,
@@ -218,5 +219,16 @@ describe('Google Maps links', () => {
     expect(mapsDirectionsLink({ lat: 1, lon: 2 }, { lat: 3, lon: 4 }, 'bike')).toBe(
       'https://www.google.com/maps/dir/?api=1&origin=1,2&destination=3,4&travelmode=bicycling',
     );
+  });
+
+  it('links each step in its own mode', () => {
+    const ride = {
+      kind: 'subway' as const,
+      fromPos: { lat: 1, lon: 2 },
+      toPos: { lat: 3, lon: 4 },
+      seconds: 60,
+    };
+    expect(stepDirectionsLink(ride)).toContain('travelmode=transit');
+    expect(stepDirectionsLink({ ...ride, kind: 'walk' })).toContain('travelmode=walking');
   });
 });

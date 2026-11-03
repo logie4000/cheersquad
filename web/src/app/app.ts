@@ -14,7 +14,6 @@ import {
   legSteps,
   lineColor,
   MapMarks,
-  mapsDirectionsLink,
   mapsPinLink,
   parseClock,
   parseGpxPoints,
@@ -23,6 +22,7 @@ import {
   Race,
   Step,
   stepDetail,
+  stepDirectionsLink,
   stepText,
   textOn,
 } from './plan';
@@ -329,7 +329,6 @@ export class App implements OnInit {
           this.minutes(s.wait),
         ],
         link: this.mapsLink(s.node.pos),
-        directions: this.directionsLink(i) ?? undefined,
         steps: legs[i],
       })),
       finish: r.finish && [
@@ -396,12 +395,8 @@ export class App implements OnInit {
   mapsLink(p: LatLon): string {
     return mapsPinLink(p);
   }
-  /** Directions in Google Maps to stop i from the previous stop, or the start. */
-  directionsLink(i: number): string | null {
-    const r = this.result();
-    const stops = r?.plan.stops ?? [];
-    const from = i > 0 ? stops[i - 1]?.node.pos : this.marks().start;
-    if (!r || !from || !stops[i]) return null;
-    return mapsDirectionsLink(from, stops[i].node.pos, r.mode);
+  /** Directions in Google Maps for one step of a leg. */
+  stepLink(s: Step): string {
+    return stepDirectionsLink(s);
   }
 }

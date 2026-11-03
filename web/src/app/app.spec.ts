@@ -220,6 +220,11 @@ describe('App', () => {
       li.textContent?.replace(/\s+/g, ' ').trim(),
     );
     expect(items).toEqual(['Walk 4 min', '1 72 St → 14 St · 9 min']);
+    const links = Array.from(el.querySelectorAll<HTMLAnchorElement>('.steps li a')).map(
+      (a) => a.href,
+    );
+    expect(links[0]).toContain('travelmode=walking');
+    expect(links[1]).toContain('travelmode=transit');
     const badge = el.querySelector<HTMLElement>('.line')!;
     expect(badge.style.backgroundColor).toBe('rgb(238, 53, 46)');
     expect(el.querySelector('.routing')?.textContent).toContain('MTA');

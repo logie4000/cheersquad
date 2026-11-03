@@ -250,18 +250,7 @@
                 </td>
                 <td>{{ clock(s.depart) }}</td>
                 <td>
-                  @if (directionsLink(i); as dir) {
-                    <a
-                      [href]="dir"
-                      target="_blank"
-                      rel="noopener"
-                      title="Directions here in Google Maps"
-                      >{{ clock(s.arrive) }}
-                      <small>({{ minutes(s.travel) }} {{ r.mode }})</small></a
-                    >
-                  } @else {
-                    {{ clock(s.arrive) }} <small>({{ minutes(s.travel) }} {{ r.mode }})</small>
-                  }
+                  {{ clock(s.arrive) }} <small>({{ minutes(s.travel) }} {{ r.mode }})</small>
                 </td>
                 <td>
                   {{ clock(s.node.tExpected) }}
@@ -282,9 +271,15 @@
                               [style.background-color]="lineBg(st)"
                               [style.color]="lineFg(st)"
                               >{{ st.line || 'Subway' }}</span
-                            >
+                            >{{ ' ' }}
                           }
-                          {{ stepDetail(st) }}
+                          <a
+                            [href]="stepLink(st)"
+                            target="_blank"
+                            rel="noopener"
+                            title="Directions in Google Maps"
+                            >{{ stepDetail(st) }}</a
+                          >
                         </li>
                       }
                     </ol>
