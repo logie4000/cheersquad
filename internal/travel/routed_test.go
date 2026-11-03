@@ -125,7 +125,7 @@ func TestRoutedScaleIgnoresOddLeg(t *testing.T) {
 	if s := r.Scale(Walk); s != 1.1 {
 		t.Fatalf("scale %f, want the median 1.1", s)
 	}
-	r.ratios[Walk] = []float64{0.1}
+	r.ratios[Walk], r.scales = []float64{0.1}, nil
 	if s := r.Scale(Walk); s != minScale {
 		t.Fatalf("scale %f, want the floor %f", s, minScale)
 	}

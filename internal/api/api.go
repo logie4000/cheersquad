@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -423,6 +424,18 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	// routed legs instead of moving to spots whose legs are estimates.
 	// Routed is then frozen, so describing the legs below routes nothing
 	// new and their steps match the times the plan was solved with.
+	// Time every leg the plan could use in a few matrix requests, so it
+	// is solved on street times from the start and the loop below only
+	// fetches the chosen legs' paths. Transit (walks to stations) and
+	// ferry-free plans skip this and rely on the loop.
+	timed := 0
+	if routed != nil && mode != travel.Transit {
+		var err error
+		timed, err = routed.Prefetch(candidatePairs(p.Spectator.Start, p.Spectator.StartTimeSeconds, nodes, buffer, mode), mode)
+		if err != nil {
+			log.Printf("streets: matrix: %v", err)
+		}
+	}
 	provider := build()
 	plan := solve(provider, nodes)
 	rounds := 0
@@ -453,8 +466,8 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 	legs := describeLegs(provider, p.Spectator.Start, plan.Stops, mode)
 	if routed != nil {
 		st, left := routed.Stats(), estimatedLegs(legs)
-		log.Printf("streets: %s plan, %d stops, %d re-plans: %d legs routed, %d no route, %d router busy; %d legs left as estimates",
-			mode, len(plan.Stops), rounds, st.Routed, st.NoRoute, st.Unavailable, left)
+		log.Printf("streets: %s plan, %d stops, %d legs timed by matrix, %d re-plans: %d legs routed, %d no route, %d router busy; %d legs left as estimates",
+			mode, len(plan.Stops), timed, rounds, st.Routed, st.NoRoute, st.Unavailable, left)
 		rt.label = streetsLabel(rt.label, st, left, cfg.Streets)
 	}
 	return &Response{
@@ -472,6 +485,36 @@ func Plan(ctx context.Context, track *gpx.Track, p Params, cfg Config) (*Respons
 		},
 		NoTransit: rt.noTransit,
 	}, nil
+}
+
+// streetSpeed is a generous bound on straight-line speed by street, in
+// m/s, for picking which legs are worth timing.
+var streetSpeed = map[travel.Mode]float64{travel.Walk: 2.5, travel.Bike: 10, travel.Drive: 35}
+
+// candidatePairs lists the legs a plan could use: from the start to each
+// spot, and from each spot to later ones, leaving out any that could not
+// be made in time even at streetSpeed.
+func candidatePairs(start geo.LatLon, startTime float64, nodes []candidates.Node, buffer float64, mode travel.Mode) []travel.Pair {
+	v := streetSpeed[mode]
+	if v <= 0 {
+		return nil
+	}
+	ns := append([]candidates.Node(nil), nodes...)
+	sort.SliceStable(ns, func(i, j int) bool { return ns[i].TFast < ns[j].TFast })
+	var out []travel.Pair
+	for _, nk := range ns {
+		if startTime+geo.Distance(start, nk.Pos)/v+buffer <= nk.TFast {
+			out = append(out, travel.Pair{A: start, B: nk.Pos})
+		}
+	}
+	for j, nj := range ns {
+		for _, nk := range ns[j+1:] {
+			if nj.TFast+geo.Distance(nj.Pos, nk.Pos)/v+buffer <= nk.TFast {
+				out = append(out, travel.Pair{A: nj.Pos, B: nk.Pos})
+			}
+		}
+	}
+	return out
 }
 
 // describeLegs breaks each stop's leg into steps, a few legs at a time
