@@ -33,7 +33,16 @@ These mirror sweat-equity's steps (its `docs/deploy-denali.md`) with
    Images > Run workflow). It creates the ECR repository on first use.
 3. **Instance role** (Denali's): make sure its ECR pull policy also covers
    `repository/cheersquad-*` (skip this if it isn't scoped to other apps'
-   prefixes). CheerSquad has no secrets, so it needs nothing from SSM.
+   prefixes). For street routes it also needs `ssm:GetParameter` on
+   `arn:aws:ssm:<region>:<account>:parameter/cheersquad/*` (and
+   `kms:Decrypt` if the parameter uses a customer-managed key; the default
+   `aws/ssm` key needs nothing extra).
+4. **OpenRouteService key** (optional, for street routes): sign up at
+   [openrouteservice.org](https://openrouteservice.org/dev/#/signup), copy
+   the free key, and store it once:
+   `aws ssm put-parameter --name /cheersquad/ORS_API_KEY --type SecureString --value '<key>'`.
+   Every deploy reads it into `.env`. Without it plans use straight-line
+   estimates.
 
 ## First deploy
 
@@ -141,10 +150,20 @@ a course outside every feed's area, transit mode walks between spots instead
 of guessing at transit speeds, and the sightings table says no transit data
 is available.
 
-Walking legs are straight-line estimates by default. For street-network
-walking times, run a self-hosted [OSRM](https://project-osrm.org/) with the
-foot profile and uncomment `OSRM_WALK_URL` in `docker-compose.yml`. It's
-optional.
+Travel times are straight-line estimates while planning. With the
+OpenRouteService key in SSM (see above), the plan's walking, biking and
+driving legs (and transit's walks) are then street routed, the plan is
+solved again with those times, and the routes are drawn on the map, in
+Print and in the PDF. That's a few requests per stop per plan, at most
+three rounds; the server keeps under the free plan's 40 a minute and
+caps itself at 1,900 a day, falling back to estimates past that or while
+ORS is down (the routing line under the plan says so). Routes are
+remembered while the container runs, so re-planning the same spots is
+free.
+
+For street-network walking times while planning too, run a self-hosted
+[OSRM](https://project-osrm.org/) with the foot profile and uncomment
+`OSRM_WALK_URL` in `docker-compose.yml`. It's optional.
 
 ## Logs and status
 

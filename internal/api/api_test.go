@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -457,5 +458,130 @@ func TestPlanVisitsPinsAndReportsMissed(t *testing.T) {
 	}
 	if len(resp.MissedPins) != 1 || resp.MissedPins[0] != offCourse {
 		t.Fatalf("missed pins %v, want [%v]", resp.MissedPins, offCourse)
+	}
+}
+
+// factorRouter street routes at seconds = Factor x straight-line meters,
+// along a path through a point beside the line, or fails with Err.
+type factorRouter struct {
+	Factor float64
+	Err    error
+	mu     sync.Mutex
+	calls  int
+	ferry  bool
+}
+
+func (f *factorRouter) Route(_ context.Context, a, b geo.LatLon, m travel.Mode, avoidFerries bool) (travel.StreetRoute, error) {
+	f.mu.Lock()
+	f.calls++
+	f.ferry = f.ferry || avoidFerries
+	f.mu.Unlock()
+	if f.Err != nil {
+		return travel.StreetRoute{}, f.Err
+	}
+	d := geo.Distance(a, b)
+	mid := geo.LatLon{Lat: (a.Lat + b.Lat) / 2, Lon: (a.Lon+b.Lon)/2 + 0.001}
+	return travel.StreetRoute{Seconds: d * f.Factor, Meters: d, Path: []geo.LatLon{a, mid, b}}, nil
+}
+
+func (f *factorRouter) String() string { return "test router" }
+
+func planStreets(t *testing.T, router travel.StreetRouter, mode string) Response {
+	t.Helper()
+	rec := requestWith(t, Config{Streets: router}, straightGPX, fmt.Sprintf(`{
+		"runner": {"finishSeconds": 3000},
+		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": %q, "bufferSeconds": 60, "startTimeSeconds": -600, "avoidFerries": true},
+		"certifiedMeters": 10000,
+		"spacingMeters": 1000
+	}`, mode))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Legs) != len(resp.Plan.Stops) || len(resp.Plan.Stops) == 0 {
+		t.Fatalf("%d legs for %d stops", len(resp.Legs), len(resp.Plan.Stops))
+	}
+	for i, leg := range resp.Legs {
+		sum := 0.0
+		for _, s := range leg {
+			sum += s.Seconds
+		}
+		if math.Abs(sum-resp.Plan.Stops[i].Travel) > 1e-6 {
+			t.Fatalf("leg %d steps sum %f, travel %f", i, sum, resp.Plan.Stops[i].Travel)
+		}
+	}
+	return resp
+}
+
+// Street routes slower than the estimates make the plan solve again, and
+// the plan that comes back uses the routed times it shows.
+func TestPlanStreetRoutesSlowerLegs(t *testing.T) {
+	estimate := planWalk(t)
+	router := &factorRouter{Factor: 1.3 / 1.0} // 1 m/s on the street, vs 1.3 m/s over 1.3x
+	resp := planStreets(t, router, "walk")
+	if !strings.Contains(resp.Routing, "Street routes: test router") {
+		t.Fatalf("routing %q", resp.Routing)
+	}
+	if !router.ferry {
+		t.Fatal("avoidFerries not passed to the router")
+	}
+	routed := 0
+	for _, leg := range resp.Legs {
+		for _, s := range leg {
+			if len(s.Path) == 3 {
+				routed++
+			}
+		}
+	}
+	if routed == 0 {
+		t.Fatal("no leg has a street path")
+	}
+	if resp.Plan.Sightings > estimate.Plan.Sightings {
+		t.Fatalf("slower streets gave more sightings (%d) than estimates (%d)", resp.Plan.Sightings, estimate.Plan.Sightings)
+	}
+	if router.calls > MaxRouteRounds*(len(resp.Plan.Stops)+5)*2 {
+		t.Fatalf("%d router calls", router.calls)
+	}
+}
+
+func TestPlanStreetRoutesDrive(t *testing.T) {
+	resp := planStreets(t, &factorRouter{Factor: 0.1}, "drive")
+	for i, leg := range resp.Legs {
+		if len(leg) != 1 || leg[0].Kind != travel.StepDrive || len(leg[0].Path) != 3 {
+			t.Fatalf("leg %d: %+v", i, leg)
+		}
+	}
+}
+
+func TestPlanStreetRoutingUnavailable(t *testing.T) {
+	resp := planStreets(t, &factorRouter{Err: travel.ErrRouterUnavailable}, "walk")
+	if !strings.Contains(resp.Routing, "unavailable") {
+		t.Fatalf("routing %q", resp.Routing)
+	}
+	for _, leg := range resp.Legs {
+		for _, s := range leg {
+			if len(s.Path) != 0 {
+				t.Fatalf("estimate leg has a path: %+v", s)
+			}
+		}
+	}
+}
+
+// Transit's walking parts are street routed; the rides are not.
+func TestPlanStreetRoutesTransitWalks(t *testing.T) {
+	router := &factorRouter{Factor: 1}
+	resp := planStreets(t, router, "transit")
+	for _, leg := range resp.Legs {
+		for _, s := range leg {
+			if s.Kind != travel.StepWalk && len(s.Path) == 3 {
+				t.Fatalf("non-walk step routed: %+v", s)
+			}
+		}
+	}
+	if router.calls == 0 {
+		t.Fatal("no walking part was routed")
 	}
 }

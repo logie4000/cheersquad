@@ -72,6 +72,9 @@
           <option value="drive">Car</option>
         </select>
       </label>
+      <label class="check">
+        <input type="checkbox" formControlName="avoidFerries" /> Avoid ferries
+      </label>
       @if (form.controls.mode.value === 'transit') {
         <label>
           Race day transit schedule

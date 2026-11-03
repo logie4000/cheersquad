@@ -6,10 +6,13 @@
 # The tag is a full commit SHA from main that the Images workflow built (its
 # run summary lists them), or omit IMAGE_TAG for the newest build ("latest").
 #
-# CheerSquad has no secrets, so unlike sweat-equity there is nothing in SSM:
-# the region comes from the instance metadata (or AWS_REGION) and the
-# registry from the instance role's account. Both are saved to .env so plain
-# `docker compose ... --env-file .env` commands work afterwards.
+# The region comes from the instance metadata (or AWS_REGION) and the
+# registry from the instance role's account. The one secret, the
+# OpenRouteService key for street routes, is read from SSM Parameter Store
+# like sweat-equity's (SecureString ORS_PARAM, default /cheersquad/ORS_API_KEY);
+# without it plans use straight-line estimates. All of it is saved to .env
+# (mode 600) so plain `docker compose ... --env-file .env` commands work
+# afterwards.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -24,12 +27,22 @@ export AWS_REGION
 export ECR_REGISTRY="${ECR_REGISTRY:-$account.dkr.ecr.$AWS_REGION.amazonaws.com}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cheersquad}"
 export IMAGE_TAG="${IMAGE_TAG:-latest}"
+ors_param="${ORS_PARAM:-/cheersquad/ORS_API_KEY}"
+if ! ORS_API_KEY=$(aws ssm get-parameter --region "$AWS_REGION" --name "$ors_param" \
+    --with-decryption --query Parameter.Value --output text 2>/dev/null); then
+  ORS_API_KEY=""
+  echo "no $ors_param in SSM (or no access): street routing off, legs are estimates" >&2
+fi
+umask 077
 cat > .env <<ENV
 AWS_REGION=$AWS_REGION
 ECR_REGISTRY=$ECR_REGISTRY
 COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
 IMAGE_TAG=$IMAGE_TAG
+ORS_API_KEY=$ORS_API_KEY
 ENV
+chmod 600 .env
+umask 022
 echo "deploying $COMPOSE_PROJECT_NAME-app:$IMAGE_TAG"
 
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
