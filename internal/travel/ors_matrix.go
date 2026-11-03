@@ -110,8 +110,8 @@ func (o *ORS) Times(ctx context.Context, pairs []Pair, m Mode) (map[Pair]float64
 	var missing []Pair
 	o.mu.Lock()
 	for _, p := range pairs {
-		if s, hit := o.times[orsKey{p.A, p.B, m, false}]; hit {
-			out[p] = s
+		if t, hit := o.times[orsKey{p.A, p.B, m, false}]; hit {
+			out[p] = t.s
 		} else {
 			missing = append(missing, p)
 		}
@@ -142,16 +142,22 @@ func (o *ORS) Times(ctx context.Context, pairs []Pair, m Mode) (map[Pair]float64
 			}
 			return out, ErrRouterUnavailable
 		}
+		day := today()
 		o.mu.Lock()
-		if o.times == nil || len(o.times) > 200_000 {
-			o.times = map[orsKey]float64{}
+		if o.times == nil {
+			o.times = map[orsKey]orsTime{}
 		}
+		var lines []cacheLine
 		for i, a := range b.src {
 			for j, d := range b.dst {
-				o.times[orsKey{a, d, m, false}] = rows[i][j]
-				out[Pair{a, d}] = rows[i][j]
+				k, t := orsKey{a, d, m, false}, orsTime{rows[i][j], day}
+				o.times[k] = t
+				out[Pair{a, d}] = t.s
+				lines = append(lines, timeLine(k, t))
 			}
 		}
+		o.trimLocked()
+		o.saveLocked(lines...)
 		o.mu.Unlock()
 	}
 	return out, nil

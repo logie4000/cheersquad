@@ -21,6 +21,14 @@ services:
       # OpenRouteService key: the final plan's legs are street routed and
       # drawn on the map. deploy.sh fills it from SSM; empty means estimates.
       ORS_API_KEY: ${ORS_API_KEY:-}
+      # ORS answers are saved here, so they outlive restarts and deploys and
+      # repeat plans of a course cost no quota.
+      ORS_CACHE_FILE: /data/cache/ors.jsonl
     volumes:
       # ./gtfs is /srv/cheersquad/gtfs on the host.
       - ./gtfs:/data/gtfs:ro
+      # A named volume (not a host folder) so the nonroot user can write it.
+      - ors-cache:/data/cache
+
+volumes:
+  ors-cache:

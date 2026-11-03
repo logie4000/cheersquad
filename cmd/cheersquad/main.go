@@ -35,7 +35,15 @@ func main() {
 	// The key comes from the environment only, never a flag, so it stays
 	// out of process listings.
 	if key := os.Getenv("ORS_API_KEY"); key != "" {
-		cfg.Streets = &travel.ORS{Key: key}
+		ors := &travel.ORS{Key: key}
+		if path := envOr("ORS_CACHE_FILE", ""); path != "" {
+			// Saved answers outlive restarts, so repeat plans of a course
+			// cost no quota. Without the file they're kept in memory only.
+			if err := ors.OpenCache(path); err != nil {
+				log.Printf("ors cache: %v; street routes are remembered in memory only", err)
+			}
+		}
+		cfg.Streets = ors
 		log.Printf("street routes for plan legs from openrouteservice.org")
 	}
 

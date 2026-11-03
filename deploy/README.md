@@ -160,9 +160,15 @@ street route the chosen legs and re-plan instead (up to 6 rounds). The
 free plan allows 500 matrix and 2,000 directions requests a day and 40 a
 minute of each; the server stays under those (450 and 1,900 a day) and
 falls back to straight-line estimates past them or while ORS is down
-(the routing line under the plan says so). Results are remembered while
-the container runs, so re-planning the same course is nearly free. Use a
-separate ORS key for local testing so it doesn't spend prod's quota.
+(the routing line under the plan says so). Answers are saved in the
+`ors-cache` Docker volume (`/data/cache/ors.jsonl`, `ORS_CACHE_FILE`), so
+they outlive restarts and deploys: once a course has been planned, other
+plans of it (other paces, modes already used) cost no requests, and a new
+starting point costs one matrix request plus directions for legs not seen
+before. Saved answers are kept for 180 days. The file grows to roughly
+40 MB at most; to start over, `docker compose down` and
+`docker volume rm cheersquad_ors-cache`. Use a separate ORS key for local
+testing so it doesn't spend prod's quota.
 
 For street-network walking times while planning too, run a self-hosted
 [OSRM](https://project-osrm.org/) with the foot profile and uncomment

@@ -59,12 +59,16 @@ type ORS struct {
 	// and 450.
 	MatrixPerMinute, MatrixPerDay int
 	// MaxMemo caps remembered routes, shared by every request; when full
-	// the memo is cleared. Zero means 5000.
+	// the oldest tenth are forgotten. Zero means 10000.
 	MaxMemo int
+	// MaxTimes caps remembered matrix times the same way. Zero means
+	// 300000.
+	MaxTimes int
 
 	mu     sync.Mutex
 	memo   map[orsKey]orsVal
-	times  map[orsKey]float64 // matrix durations; NaN for no route
+	times  map[orsKey]orsTime // matrix durations
+	cache  *orsCache          // the file answers are saved to (OpenCache)
 	dir    orsBudget          // directions requests
 	mat    orsBudget          // matrix requests
 	logged string             // last logged failure, so each is logged once
@@ -85,8 +89,14 @@ type orsKey struct {
 }
 
 type orsVal struct {
-	r  StreetRoute
-	ok bool // false: ErrNoStreetRoute
+	r   StreetRoute
+	ok  bool  // false: ErrNoStreetRoute
+	day int64 // when ORS answered, in days since the Unix epoch
+}
+
+type orsTime struct {
+	s   float64 // seconds; NaN for no route
+	day int64
 }
 
 // orsProfiles maps modes to ORS profiles. Transit has none.
@@ -157,7 +167,7 @@ func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries b
 	}
 	switch {
 	case err == nil:
-		o.store(k, orsVal{r, true})
+		o.store(k, orsVal{r: r, ok: true})
 		return r, nil
 	case errors.Is(err, ErrNoStreetRoute):
 		o.store(k, orsVal{})
@@ -256,16 +266,15 @@ func (o *ORS) backOff(b *orsBudget) {
 }
 
 func (o *ORS) store(k orsKey, v orsVal) {
-	limit := o.MaxMemo
-	if limit <= 0 {
-		limit = 5000
-	}
+	v.day = today()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.memo == nil || len(o.memo) >= limit {
+	if o.memo == nil {
 		o.memo = map[orsKey]orsVal{}
 	}
 	o.memo[k] = v
+	o.trimLocked()
+	o.saveLocked(routeLine(k, v))
 }
 
 // fail pauses one endpoint for a while and logs the error once.

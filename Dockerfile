@@ -15,11 +15,15 @@ COPY go.mod ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/cheersquad ./cmd/cheersquad
+# The street-route cache's folder, owned by the nonroot user so a new Docker
+# volume mounted there starts out writable.
+RUN mkdir -p /out/cache
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/cheersquad /app/cheersquad
 COPY --from=web /web/dist/cheersquad-web/browser /app/web
+COPY --from=build --chown=65532:65532 /out/cache /data/cache
 ENV ADDR=:8080 STATIC_DIR=/app/web
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
