@@ -604,3 +604,57 @@ func TestStreetsLabel(t *testing.T) {
 		}
 	}
 }
+
+// matrixRouter is factorRouter that also times pairs in bulk, counting
+// matrix calls the way ORS would make them.
+type matrixRouter struct {
+	factorRouter
+	matrixCalls int
+}
+
+func (m *matrixRouter) Times(_ context.Context, pairs []travel.Pair, _ travel.Mode) (map[travel.Pair]float64, error) {
+	m.mu.Lock()
+	m.matrixCalls++
+	m.mu.Unlock()
+	out := map[travel.Pair]float64{}
+	for _, p := range pairs {
+		out[p] = geo.Distance(p.A, p.B) * m.Factor
+	}
+	return out, nil
+}
+
+// With a matrix, the plan is solved once on street times and only its
+// legs' paths are fetched: one directions request per leg.
+func TestPlanStreetsWithMatrix(t *testing.T) {
+	router := &matrixRouter{factorRouter: factorRouter{Factor: 1.3}}
+	rec := requestWith(t, Config{Streets: router}, straightGPX, `{
+		"runner": {"finishSeconds": 3000},
+		"spectator": {"start": {"lat": 0, "lon": 0.003}, "mode": "walk", "bufferSeconds": 60, "startTimeSeconds": -600},
+		"certifiedMeters": 10000,
+		"spacingMeters": 1000
+	}`)
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if router.matrixCalls != 1 || router.calls != len(resp.Legs) {
+		t.Fatalf("%d matrix calls and %d directions for %d legs", router.matrixCalls, router.calls, len(resp.Legs))
+	}
+	for i, leg := range resp.Legs {
+		if len(leg) != 1 || len(leg[0].Path) != 3 || math.Abs(leg[0].Seconds-resp.Plan.Stops[i].Travel) > 1e-6 {
+			t.Fatalf("leg %d: %+v for travel %f", i, leg, resp.Plan.Stops[i].Travel)
+		}
+	}
+	if estimatedLegs(resp.Legs) != 0 {
+		t.Fatal("legs left as estimates")
+	}
+}
+
+// Avoiding ferries skips the matrix, which can't avoid them.
+func TestPlanStreetsAvoidFerriesSkipsMatrix(t *testing.T) {
+	router := &matrixRouter{factorRouter: factorRouter{Factor: 1.3}}
+	planStreets(t, router, "walk")
+	if router.matrixCalls != 0 {
+		t.Fatalf("%d matrix calls with avoidFerries", router.matrixCalls)
+	}
+}

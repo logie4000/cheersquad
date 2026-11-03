@@ -40,9 +40,10 @@ var ErrNoStreetRoute = errors.New("no street route")
 var ErrRouterUnavailable = errors.New("street routing unavailable")
 
 // ORS routes legs with the OpenRouteService directions API
-// (api.openrouteservice.org). The free plan allows 2,000 directions a day
-// and 40 a minute; ORS stays under both itself, and pauses after errors,
-// so callers fall back to estimates rather than wait.
+// (api.openrouteservice.org), and times many legs at once with its matrix
+// API (see Times). The free plan allows 2,000 directions and 500 matrix
+// requests a day, and 40 a minute of each; ORS stays under those itself,
+// and pauses after errors, so callers fall back to estimates.
 type ORS struct {
 	// Key is the API key, sent in the Authorization header.
 	Key string
@@ -50,20 +51,31 @@ type ORS struct {
 	BaseURL string
 	// Client is the HTTP client. Nil means one with a 10 s timeout.
 	Client *http.Client
-	// PerMinute and PerDay cap requests. Zero means 35 and 1900, a little
-	// under the free plan's limits so other uses of the key still work.
+	// PerMinute and PerDay cap directions requests. Zero means 35 and
+	// 1900, a little under the free plan's limits so other uses of the key
+	// still work.
 	PerMinute, PerDay int
+	// MatrixPerMinute and MatrixPerDay cap matrix requests. Zero means 35
+	// and 450.
+	MatrixPerMinute, MatrixPerDay int
 	// MaxMemo caps remembered routes, shared by every request; when full
 	// the memo is cleared. Zero means 5000.
 	MaxMemo int
 
-	mu        sync.Mutex
-	memo      map[orsKey]orsVal
+	mu     sync.Mutex
+	memo   map[orsKey]orsVal
+	times  map[orsKey]float64 // matrix durations; NaN for no route
+	dir    orsBudget          // directions requests
+	mat    orsBudget          // matrix requests
+	logged string             // last logged failure, so each is logged once
+}
+
+// orsBudget tracks one endpoint's requests against its limits.
+type orsBudget struct {
 	recent    []time.Time // request times in the last minute
-	day       string      // UTC date of dayCount
-	dayCount  int
+	day       string      // UTC date of count
+	count     int
 	downUntil time.Time
-	logged    string // last logged failure, so each is logged once
 }
 
 type orsKey struct {
@@ -132,13 +144,13 @@ func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries b
 	var r StreetRoute
 	var err error
 	for attempt := 0; ; attempt++ {
-		if err := o.take(ctx); err != nil {
+		if err := o.take(ctx, &o.dir); err != nil {
 			return StreetRoute{}, err
 		}
 		r, err = o.request(ctx, profile, a, b, avoidFerries)
 		var se *orsStatusError
 		if attempt == 0 && errors.As(err, &se) && se.code == http.StatusTooManyRequests {
-			o.backOff()
+			o.backOff(&o.dir)
 			continue // take waits out the pause if the deadline allows
 		}
 		break
@@ -153,7 +165,7 @@ func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries b
 	case ctx.Err() != nil:
 		return StreetRoute{}, ErrRouterUnavailable
 	}
-	o.fail(err)
+	o.fail(&o.dir, err)
 	return StreetRoute{}, ErrRouterUnavailable
 }
 
@@ -161,8 +173,14 @@ func (o *ORS) Route(ctx context.Context, a, b geo.LatLon, m Mode, avoidFerries b
 // minute budget is spent, or ORS asked us to slow down, it waits for a
 // slot, up to orsMaxWait and only if ctx's deadline leaves a few seconds
 // after that for the request; otherwise the leg keeps its estimate.
-func (o *ORS) take(ctx context.Context) error {
+func (o *ORS) take(ctx context.Context, b *orsBudget) error {
 	perMin, perDay := o.PerMinute, o.PerDay
+	if b == &o.mat {
+		perMin, perDay = o.MatrixPerMinute, o.MatrixPerDay
+		if perDay <= 0 {
+			perDay = 450
+		}
+	}
 	if perMin <= 0 {
 		perMin = 35
 	}
@@ -170,7 +188,7 @@ func (o *ORS) take(ctx context.Context) error {
 		perDay = 1900
 	}
 	for {
-		wait, err := o.tryTake(perMin, perDay)
+		wait, err := o.tryTake(b, perMin, perDay)
 		if err != nil || wait == 0 {
 			return err
 		}
@@ -191,43 +209,50 @@ func (o *ORS) take(ctx context.Context) error {
 }
 
 // tryTake claims a request now, or says how long until one may be.
-func (o *ORS) tryTake(perMin, perDay int) (time.Duration, error) {
+func (o *ORS) tryTake(b *orsBudget, perMin, perDay int) (time.Duration, error) {
 	now := time.Now()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if d := now.UTC().Format("2006-01-02"); d != o.day {
-		o.day, o.dayCount = d, 0
+	if d := now.UTC().Format("2006-01-02"); d != b.day {
+		b.day, b.count = d, 0
 	}
-	if o.dayCount >= perDay {
-		o.logOnce(fmt.Sprintf("ors: daily budget of %d requests used; straight-line estimates until midnight UTC", perDay))
+	if b.count >= perDay {
+		o.logOnce(fmt.Sprintf("ors: daily budget of %d %s requests used; estimates until midnight UTC", perDay, o.label(b)))
 		return 0, ErrRouterUnavailable
 	}
-	if now.Before(o.downUntil) {
-		return o.downUntil.Sub(now), nil
+	if now.Before(b.downUntil) {
+		return b.downUntil.Sub(now), nil
 	}
-	keep := o.recent[:0]
-	for _, t := range o.recent {
+	keep := b.recent[:0]
+	for _, t := range b.recent {
 		if now.Sub(t) < time.Minute {
 			keep = append(keep, t)
 		}
 	}
-	o.recent = keep
-	if len(o.recent) >= perMin {
-		return o.recent[0].Add(time.Minute).Sub(now) + 10*time.Millisecond, nil
+	b.recent = keep
+	if len(b.recent) >= perMin {
+		return b.recent[0].Add(time.Minute).Sub(now) + 10*time.Millisecond, nil
 	}
-	o.recent = append(o.recent, now)
-	o.dayCount++
+	b.recent = append(b.recent, now)
+	b.count++
 	return 0, nil
 }
 
+func (o *ORS) label(b *orsBudget) string {
+	if b == &o.mat {
+		return "matrix"
+	}
+	return "directions"
+}
+
 // backOff pauses requests briefly after ORS said 429.
-func (o *ORS) backOff() {
+func (o *ORS) backOff(b *orsBudget) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if until := time.Now().Add(orsRateBackoff); until.After(o.downUntil) {
-		o.downUntil = until
+	if until := time.Now().Add(orsRateBackoff); until.After(b.downUntil) {
+		b.downUntil = until
 	}
-	o.logOnce("ors: status 429 (too many requests); waiting a few seconds")
+	o.logOnce(fmt.Sprintf("ors: %s status 429 (too many requests); waiting a few seconds", o.label(b)))
 }
 
 func (o *ORS) store(k orsKey, v orsVal) {
@@ -243,12 +268,12 @@ func (o *ORS) store(k orsKey, v orsVal) {
 	o.memo[k] = v
 }
 
-// fail pauses ORS for a while and logs the error once.
-func (o *ORS) fail(err error) {
+// fail pauses one endpoint for a while and logs the error once.
+func (o *ORS) fail(b *orsBudget, err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.downUntil = time.Now().Add(orsRetry)
-	o.logOnce(fmt.Sprintf("ors: %v; straight-line estimates for a minute", err))
+	b.downUntil = time.Now().Add(orsRetry)
+	o.logOnce(fmt.Sprintf("ors: %s %v; estimates for a minute", o.label(b), err))
 }
 
 // logOnce logs msg unless it was the last thing logged. The caller holds o.mu.

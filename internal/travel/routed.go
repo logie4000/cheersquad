@@ -3,6 +3,7 @@ package travel
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"sync"
 
@@ -54,6 +55,9 @@ type Routed struct {
 	// estimated seconds for every routed leg in mode m; their median scales
 	// unrouted estimates.
 	ratios map[Mode][]float64
+	scales map[Mode]float64 // the median per mode, cached; reset on change
+	// timed holds adjusted times from Prefetch, which have no paths.
+	timed map[cacheKey]float64
 }
 
 // RoutedStats counts what happened to the legs Routed asked about.
@@ -98,6 +102,27 @@ func (r *Routed) Scale(m Mode) float64 {
 }
 
 func (r *Routed) scale(m Mode) float64 {
+	if s, ok := r.scales[m]; ok {
+		return s
+	}
+	s := r.median(m)
+	if r.scales == nil {
+		r.scales = map[Mode]float64{}
+	}
+	r.scales[m] = s
+	return s
+}
+
+// addRatio records one routed leg's ratio. The caller holds r.mu.
+func (r *Routed) addRatio(m Mode, ratio float64) {
+	if r.ratios == nil {
+		r.ratios = map[Mode][]float64{}
+	}
+	r.ratios[m] = append(r.ratios[m], ratio)
+	delete(r.scales, m)
+}
+
+func (r *Routed) median(m Mode) float64 {
 	rs := r.ratios[m]
 	if len(rs) == 0 {
 		return 1
@@ -140,15 +165,19 @@ func (r *Routed) adjust(m Mode) RaceDayAdjust {
 	return RaceDayAdjust{1, 0}
 }
 
-// Duration is the routed time for legs already routed, else the scaled
-// estimate.
+// Duration is the routed time for legs already routed, else the time
+// from Prefetch, else the scaled estimate.
 func (r *Routed) Duration(a, b geo.LatLon, m Mode) (float64, bool) {
 	k := cacheKey{a, b, m}
 	r.mu.Lock()
 	sr, hit := r.known[k]
+	t, timed := r.timed[k]
 	r.mu.Unlock()
 	if hit {
 		return sr.Seconds, true
+	}
+	if timed {
+		return t, true
 	}
 	s, ok := r.Estimate.Duration(a, b, m)
 	r.mu.Lock()
@@ -172,6 +201,13 @@ func (r *Routed) Steps(a, b geo.LatLon, m Mode) ([]Step, bool) {
 		sr, hit = r.route(k)
 	}
 	if !hit {
+		r.mu.Lock()
+		t, timed := r.timed[k]
+		r.mu.Unlock()
+		if timed {
+			// Timed but no path: a straight step, with the time planned on.
+			return []Step{{Kind: StepKindFor(m), FromPos: a, ToPos: b, Seconds: t}}, true
+		}
 		return r.estimateSteps(a, b, m)
 	}
 	return []Step{{Kind: StepKindFor(m), FromPos: a, ToPos: b, Path: sr.Path, Seconds: sr.Seconds}}, true
@@ -222,20 +258,24 @@ func (r *Routed) route(k cacheKey) (StreetRoute, bool) {
 		}
 		return StreetRoute{}, false
 	}
-	adj := r.adjust(k.m)
-	raw := sr.Seconds * adj.Factor
-	sr.Seconds = raw + adj.Overhead
 	if r.known == nil {
 		r.known = map[cacheKey]StreetRoute{}
 	}
+	r.stats.Routed++
+	if t, timed := r.timed[k]; timed {
+		// The plan already used the matrix time; keep it so the steps add
+		// up, and take just the path (both come from the same router).
+		sr.Seconds = t
+		r.known[k] = sr
+		return sr, true
+	}
+	adj := r.adjust(k.m)
+	raw := sr.Seconds * adj.Factor
+	sr.Seconds = raw + adj.Overhead
 	r.known[k] = sr
 	r.fresh++
-	r.stats.Routed++
 	if estOK && est > 0 {
-		if r.ratios == nil {
-			r.ratios = map[Mode][]float64{}
-		}
-		r.ratios[k.m] = append(r.ratios[k.m], raw/est)
+		r.addRatio(k.m, raw/est)
 	}
 	return sr, true
 }
@@ -263,5 +303,62 @@ func (r *Routed) MaxSpeed(m Mode) float64 {
 		}
 		b = max(b, geo.Distance(k.a, k.b)/sr.Seconds)
 	}
+	for k, t := range r.timed {
+		if k.m != m || k.a == k.b {
+			continue
+		}
+		if t <= 0 {
+			return 0
+		}
+		b = max(b, geo.Distance(k.a, k.b)/t)
+	}
 	return b
+}
+
+// Prefetch times the pairs in mode m in a few requests, if the router is
+// a PairTimer, so the planner works with street times from the start and
+// Steps only fetches the plan's paths. Ferries can't be avoided this way,
+// so with AvoidFerries it does nothing. It returns how many pairs it
+// timed; a failure part way keeps what was timed.
+func (r *Routed) Prefetch(pairs []Pair, m Mode) (int, error) {
+	pt, ok := r.Router.(PairTimer)
+	if !ok || r.AvoidFerries || len(pairs) == 0 {
+		return 0, nil
+	}
+	if _, routable := orsProfiles[m]; !routable {
+		return 0, nil
+	}
+	ctx := r.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	times, err := pt.Times(ctx, pairs, m)
+	adj := r.adjust(m)
+	ests := make(map[Pair]float64, len(times))
+	for p := range times {
+		if est, ok := r.Estimate.Duration(p.A, p.B, m); ok {
+			ests[p] = est
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.timed == nil {
+		r.timed = map[cacheKey]float64{}
+	}
+	n := 0
+	for p, raw := range times {
+		if math.IsNaN(raw) || p.A == p.B {
+			continue // no route there: keep the estimate
+		}
+		s := raw*adj.Factor + adj.Overhead
+		r.timed[cacheKey{p.A, p.B, m}] = s
+		n++
+		if est := ests[p]; est > 0 {
+			r.addRatio(m, raw*adj.Factor/est)
+		}
+	}
+	if err != nil && !errors.Is(err, ErrTooManyPairs) {
+		r.stats.Unavailable++
+	}
+	return n, err
 }

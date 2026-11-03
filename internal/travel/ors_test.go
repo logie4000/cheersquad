@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,8 +145,8 @@ func TestORSWaitsForSlot(t *testing.T) {
 	srv := fakeORS(t, &hits, &status)
 	defer srv.Close()
 	o := &ORS{Key: "k3y", BaseURL: srv.URL, PerMinute: 1}
-	o.recent = []time.Time{time.Now().Add(-time.Minute + 50*time.Millisecond)}
-	o.day = time.Now().UTC().Format("2006-01-02")
+	o.dir.recent = []time.Time{time.Now().Add(-time.Minute + 50*time.Millisecond)}
+	o.dir.day = time.Now().UTC().Format("2006-01-02")
 	if _, err := o.Route(context.Background(), geo.LatLon{}, geo.LatLon{Lat: 0.01}, Walk, false); err != nil || hits != 1 {
 		t.Fatalf("err %v after %d requests", err, hits)
 	}
@@ -172,5 +173,85 @@ func TestORSBudget(t *testing.T) {
 	o2.Route(context.Background(), a, geo.LatLon{Lat: 0.01, Lon: 0}, Walk, false)
 	if _, err := o2.Route(context.Background(), a, geo.LatLon{Lat: 0.02, Lon: 0}, Walk, false); !errors.Is(err, ErrRouterUnavailable) {
 		t.Fatalf("over the daily budget: %v", err)
+	}
+}
+
+func TestBlocksCoverPairsWithinCells(t *testing.T) {
+	var pairs []Pair
+	pts := make([]geo.LatLon, 150)
+	for i := range pts {
+		pts[i] = geo.LatLon{Lat: float64(i) * 0.001}
+	}
+	for i := range pts {
+		for j := i + 1; j < len(pts); j++ {
+			pairs = append(pairs, Pair{pts[i], pts[j]})
+		}
+	}
+	bs := blocks(pairs)
+	covered := map[Pair]bool{}
+	for _, b := range bs {
+		if len(b.src)*len(b.dst) > MatrixCells {
+			t.Fatalf("block %dx%d over %d cells", len(b.src), len(b.dst), MatrixCells)
+		}
+		for _, a := range b.src {
+			for _, d := range b.dst {
+				covered[Pair{a, d}] = true
+			}
+		}
+	}
+	for _, p := range pairs {
+		if !covered[p] {
+			t.Fatalf("pair %v not covered", p)
+		}
+	}
+	t.Logf("%d pairs in %d blocks", len(pairs), len(bs))
+}
+
+// fakeMatrix answers /v2/matrix at 1 m/s straight-line, null to island.
+func fakeMatrix(t *testing.T, hits *int32) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(hits, 1)
+		if r.URL.Path != "/v2/matrix/foot-walking" || r.Header.Get("Authorization") != "k3y" {
+			t.Errorf("unexpected %s with auth %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var req orsMatrixRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		loc := func(i int) geo.LatLon {
+			return geo.LatLon{Lat: req.Locations[i][1], Lon: req.Locations[i][0]}
+		}
+		rows := make([][]*float64, len(req.Sources))
+		for i, s := range req.Sources {
+			for _, d := range req.Destinations {
+				a, b := loc(s), loc(d)
+				if a == island || b == island {
+					rows[i] = append(rows[i], nil)
+					continue
+				}
+				v := geo.Distance(a, b)
+				rows[i] = append(rows[i], &v)
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"durations": rows})
+	}))
+}
+
+func TestORSTimes(t *testing.T) {
+	var hits int32
+	srv := fakeMatrix(t, &hits)
+	defer srv.Close()
+	o := &ORS{Key: "k3y", BaseURL: srv.URL}
+	a, b, c := geo.LatLon{}, geo.LatLon{Lat: 0.01}, geo.LatLon{Lat: 0.02}
+	pairs := []Pair{{a, b}, {a, c}, {b, c}, {a, island}}
+	got, err := o.Times(context.Background(), pairs, Walk)
+	if err != nil || hits != 1 {
+		t.Fatalf("err %v after %d requests", err, hits)
+	}
+	if got[Pair{a, c}] != geo.Distance(a, c) || !math.IsNaN(got[Pair{a, island}]) {
+		t.Fatalf("times %v", got)
+	}
+	if _, err := o.Times(context.Background(), pairs, Walk); err != nil || hits != 1 {
+		t.Fatalf("repeat should come from the memo: %v after %d requests", err, hits)
 	}
 }

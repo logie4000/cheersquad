@@ -150,16 +150,19 @@ a course outside every feed's area, transit mode walks between spots instead
 of guessing at transit speeds, and the sightings table says no transit data
 is available.
 
-Travel times are straight-line estimates while planning. With the
-OpenRouteService key in SSM (see above), the plan's walking, biking and
-driving legs (and transit's walks) are then street routed, the plan is
-solved again with those times, and the routes are drawn on the map, in
-Print and in the PDF. That's a few requests per stop per plan, at most
-three rounds; the server keeps under the free plan's 40 a minute and
-caps itself at 1,900 a day, falling back to estimates past that or while
-ORS is down (the routing line under the plan says so). Routes are
-remembered while the container runs, so re-planning the same spots is
-free.
+With the OpenRouteService key in SSM (see above), walking, biking and
+driving plans first time every leg the plan could use with ORS's matrix
+API (typically 3-4 requests), are solved on those street times, and then
+fetch street directions for just the chosen legs (one request per stop),
+which are drawn on the map, in Print and in the PDF. Transit plans (walks
+to stations) and plans that avoid ferries, which the matrix can't do,
+street route the chosen legs and re-plan instead (up to 6 rounds). The
+free plan allows 500 matrix and 2,000 directions requests a day and 40 a
+minute of each; the server stays under those (450 and 1,900 a day) and
+falls back to straight-line estimates past them or while ORS is down
+(the routing line under the plan says so). Results are remembered while
+the container runs, so re-planning the same course is nearly free. Use a
+separate ORS key for local testing so it doesn't spend prod's quota.
 
 For street-network walking times while planning too, run a self-hosted
 [OSRM](https://project-osrm.org/) with the foot profile and uncomment
