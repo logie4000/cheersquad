@@ -36,15 +36,16 @@
 #   sf       BART and Muni (Muni Metro), saved as sf/bart.zip and
 #            sf/muni.zip; a folder of zips loads as one network
 #   sydney   Sydney Trains, Metro and light rail, saved in sydney/; needs a
-#            free API key from https://opendata.transport.nsw.gov.au in
-#            TFNSW_API_KEY
+#            free API key from https://opendata.transport.nsw.gov.au, in
+#            TFNSW_API_KEY or else in the SSM parameter
+#            /webapp/cheer-squad/TFNSW_API_KEY
 # (Cape Town has no subway or metro: MyCiTi is bus rapid transit.)
 set -euo pipefail
 
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"
 
 usage() {
-  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -122,8 +123,12 @@ for arg in "$@"; do
       fetch sf/muni https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip || status=1
       ;;
     sydney)
+      tfnsw_param=${TFNSW_PARAM:-/webapp/cheer-squad/TFNSW_API_KEY}
+      if [ -z "${TFNSW_API_KEY:-}" ] && ! TFNSW_API_KEY=$(ssm_param "$tfnsw_param"); then
+        TFNSW_API_KEY=
+      fi
       if [ -z "${TFNSW_API_KEY:-}" ]; then
-        echo "sydney: set TFNSW_API_KEY (free key from https://opendata.transport.nsw.gov.au)" >&2
+        echo "sydney: set TFNSW_API_KEY or store it in SSM as $tfnsw_param (free key from https://opendata.transport.nsw.gov.au)" >&2
         status=1
         continue
       fi

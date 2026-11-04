@@ -142,8 +142,10 @@ and `sydney`. A city whose agencies publish separately gets a folder of
 zips, which the server merges into one network with walking transfers
 between them: `sf/` holds BART and Muni, `sydney/` holds Sydney Trains,
 Metro and light rail. `sydney` needs a free Transport for NSW key from
-<https://opendata.transport.nsw.gov.au>:
-`TFNSW_API_KEY=... deploy/scripts/fetch-gtfs.sh sydney`. Cape Town has no
+<https://opendata.transport.nsw.gov.au>, stored in SSM like WMATA's:
+`aws ssm put-parameter --name /webapp/cheer-squad/TFNSW_API_KEY --type SecureString --value '<key>'`,
+then `deploy/scripts/fetch-gtfs.sh sydney` (`TFNSW_API_KEY=...` in the
+environment wins). Cape Town has no
 subway or metro (MyCiTi is bus rapid transit), so it has no feed.
 
 Any other agency's feed works with `NAME=URL`; to merge several agencies,
