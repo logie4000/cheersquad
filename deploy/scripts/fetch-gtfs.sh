@@ -19,7 +19,8 @@
 #   boston   MBTA (whole system; the T's subway and Green Line are used)
 #   chicago  CTA (the 'L' lines are used)
 #   dc       WMATA Metrorail; needs a free API key from
-#            https://developer.wmata.com in WMATA_API_KEY
+#            https://developer.wmata.com, in WMATA_API_KEY or else in the
+#            SSM parameter /webapp/cheer-squad/WMATA_API_KEY
 #   london   TfL Underground, DLR and trams,
 #            converted from TfL's TransXChange timetables in a python
 #            container (needs docker; no TfL key needed). If TfL
@@ -35,15 +36,16 @@
 #   sf       BART and Muni (Muni Metro), saved as sf/bart.zip and
 #            sf/muni.zip; a folder of zips loads as one network
 #   sydney   Sydney Trains, Metro and light rail, saved in sydney/; needs a
-#            free API key from https://opendata.transport.nsw.gov.au in
-#            TFNSW_API_KEY
+#            free API key from https://opendata.transport.nsw.gov.au, in
+#            TFNSW_API_KEY or else in the SSM parameter
+#            /webapp/cheer-squad/TFNSW_API_KEY
 # (Cape Town has no subway or metro: MyCiTi is bus rapid transit.)
 set -euo pipefail
 
 dir="${GTFS_DIR:-/srv/cheersquad/gtfs}"
 
 usage() {
-  sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -73,6 +75,20 @@ fetch() {
   echo "saved $dest ($(wc -c <"$dest") bytes)"
 }
 
+# ssm_param NAME prints a SecureString parameter from SSM, or fails. The
+# region is AWS_REGION or the instance's own, as in deploy.sh.
+ssm_param() {
+  local region=${AWS_REGION:-} token
+  if [ -z "$region" ]; then
+    token=$(curl -fsS -m 2 -X PUT http://169.254.169.254/latest/api/token \
+      -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null) || return 1
+    region=$(curl -fsS -m 2 -H "X-aws-ec2-metadata-token: $token" \
+      http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null) || return 1
+  fi
+  aws ssm get-parameter --region "$region" --name "$1" --with-decryption \
+    --query Parameter.Value --output text 2>/dev/null
+}
+
 [ $# -gt 0 ] || usage 1
 case "$1" in -h | --help) usage ;; esac
 
@@ -84,8 +100,12 @@ for arg in "$@"; do
     boston) fetch boston https://cdn.mbta.com/MBTA_GTFS.zip || status=1 ;;
     chicago) fetch chicago https://www.transitchicago.com/downloads/sch_data/google_transit.zip || status=1 ;;
     dc)
+      wmata_param=${WMATA_PARAM:-/webapp/cheer-squad/WMATA_API_KEY}
+      if [ -z "${WMATA_API_KEY:-}" ] && ! WMATA_API_KEY=$(ssm_param "$wmata_param"); then
+        WMATA_API_KEY=
+      fi
       if [ -z "${WMATA_API_KEY:-}" ]; then
-        echo "dc: set WMATA_API_KEY (free key from https://developer.wmata.com)" >&2
+        echo "dc: set WMATA_API_KEY or store it in SSM as $wmata_param (free key from https://developer.wmata.com)" >&2
         status=1
         continue
       fi
@@ -103,8 +123,12 @@ for arg in "$@"; do
       fetch sf/muni https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip || status=1
       ;;
     sydney)
+      tfnsw_param=${TFNSW_PARAM:-/webapp/cheer-squad/TFNSW_API_KEY}
+      if [ -z "${TFNSW_API_KEY:-}" ] && ! TFNSW_API_KEY=$(ssm_param "$tfnsw_param"); then
+        TFNSW_API_KEY=
+      fi
       if [ -z "${TFNSW_API_KEY:-}" ]; then
-        echo "sydney: set TFNSW_API_KEY (free key from https://opendata.transport.nsw.gov.au)" >&2
+        echo "sydney: set TFNSW_API_KEY or store it in SSM as $tfnsw_param (free key from https://opendata.transport.nsw.gov.au)" >&2
         status=1
         continue
       fi
