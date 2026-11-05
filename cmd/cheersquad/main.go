@@ -7,10 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/logie4000/cheersquad/internal/api"
+	"github.com/logie4000/cheersquad/internal/site"
 	"github.com/logie4000/cheersquad/internal/travel"
 )
 
@@ -19,6 +19,7 @@ func main() {
 	static := flag.String("static", envOr("STATIC_DIR", "web/dist"), "directory of built UI files")
 	gtfsDir := flag.String("gtfs-dir", envOr("GTFS_DIR", ""), "directory of GTFS feeds for subway routing (empty: straight-line transit estimate)")
 	osrmWalk := flag.String("osrm-walk-url", envOr("OSRM_WALK_URL", ""), "OSRM server with a foot profile for walking times (empty: straight-line estimate)")
+	siteURL := flag.String("site-url", envOr("SITE_URL", ""), "public base URL for the canonical link, social cards and sitemap, e.g. https://www.example.org/cheersquad/ (empty: from the request's Host and X-Forwarded-* headers)")
 	healthcheck := flag.Bool("healthcheck", false, "probe /api/healthz on addr and exit (for Docker HEALTHCHECK)")
 	flag.Parse()
 
@@ -48,8 +49,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.Handler(cfg))
-	mux.Handle("/", spa(*static))
+	mux.Handle("/api/", noIndex(api.Handler(cfg)))
+	mux.Handle("/", site.Handler(site.Config{Dir: *static, URL: *siteURL}))
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -62,21 +63,11 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-// spa serves files from dir, falling back to index.html so client-side
-// routes work on reload.
-func spa(dir string) http.Handler {
-	files := http.FileServer(http.Dir(dir))
+// noIndex keeps API answers (race GPX files, errors) out of search results.
+func noIndex(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := os.Stat(filepath.Join(dir, filepath.Clean("/"+r.URL.Path))); err != nil {
-			index := filepath.Join(dir, "index.html")
-			if _, err := os.Stat(index); err != nil {
-				http.Error(w, "CheerSquad UI not built yet; the API is at /api/", http.StatusNotFound)
-				return
-			}
-			http.ServeFile(w, r, index)
-			return
-		}
-		files.ServeHTTP(w, r)
+		w.Header().Set("X-Robots-Tag", "noindex")
+		h.ServeHTTP(w, r)
 	})
 }
 

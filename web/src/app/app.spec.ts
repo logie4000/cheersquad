@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { App } from './app';
+import { App, racePageSlug } from './app';
 import { CourseMap } from './course-map';
 import { PlanPdf } from './pdf-export';
 import { parseGpxPoints, PlanResponse } from './plan';
@@ -74,8 +74,12 @@ describe('App', () => {
 
   describe('preloaded races', () => {
     let http: HttpTestingController;
+    const startUrl = location.href;
     beforeEach(() => (http = TestBed.inject(HttpTestingController)));
-    afterEach(() => http.verify());
+    afterEach(() => {
+      http.verify();
+      history.replaceState(null, '', startUrl);
+    });
 
     function render() {
       const fixture = TestBed.createComponent(App);
@@ -145,6 +149,57 @@ describe('App', () => {
       http.expectOne('api/races/boston').flush('nope', { status: 404, statusText: 'Not Found' });
       expect(fixture.componentInstance.error()).toContain('race');
       expect(fixture.componentInstance.gpxFile()).toBeNull();
+    });
+
+    it('opens a race page with its race loaded', () => {
+      history.replaceState(null, '', '/cheersquad/races/nyc-marathon');
+      const fixture = render();
+      http.expectOne('api/races').flush([
+        {
+          id: 'boston-2025',
+          name: 'Boston Marathon 2025',
+          slug: 'boston-marathon',
+          day: 'weekday',
+        },
+        { id: 'nyc-2026', name: 'New York City Marathon 2026', slug: 'nyc-marathon' },
+      ]);
+      http.expectOne('api/races/nyc-2026').flush(GPX);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.raceId()).toBe('nyc-2026');
+      const select = (fixture.nativeElement as HTMLElement).querySelector('select')!;
+      expect(select.value).toBe('nyc-2026');
+    });
+
+    it('ignores a race page for a race it does not know', () => {
+      history.replaceState(null, '', '/cheersquad/races/gone');
+      const fixture = render();
+      http.expectOne('api/races').flush([{ id: 'boston', name: 'Boston Marathon' }]);
+      expect(fixture.componentInstance.raceId()).toBe('');
+    });
+
+    it("shows the chosen race's page in the address bar, and the front page after an upload", () => {
+      history.replaceState(null, '', '/cheersquad/');
+      const base = document.head.appendChild(document.createElement('base'));
+      base.setAttribute('href', './');
+      onTestFinished(() => base.remove());
+      const fixture = render();
+      http.expectOne('api/races').flush([
+        {
+          id: 'boston-2025',
+          name: 'Boston Marathon 2025',
+          slug: 'boston-marathon',
+          shortName: 'Boston Marathon',
+        },
+      ]);
+      fixture.detectChanges();
+      const select = (fixture.nativeElement as HTMLElement).querySelector('select')!;
+      select.value = 'boston-2025';
+      select.dispatchEvent(new Event('change'));
+      http.expectOne('api/races/boston-2025').flush(GPX);
+      expect(location.pathname).toBe('/cheersquad/races/boston-marathon');
+      expect(document.title).toBe('Where to watch the Boston Marathon | Cheer Squad');
+      void fixture.componentInstance.onFile({ target: { files: [] } } as unknown as Event);
+      expect(location.pathname).toBe('/cheersquad/');
     });
 
     it('hides the dropdown when there are no races', () => {
@@ -404,5 +459,19 @@ describe('App', () => {
       expect(app.error()).toContain('Print');
       expect(app.exportingPdf()).toBe(false);
     });
+  });
+});
+
+describe('racePageSlug', () => {
+  it('reads the race from a race page path', () => {
+    expect(racePageSlug('/cheersquad/races/nyc-marathon-blue-route')).toBe(
+      'nyc-marathon-blue-route',
+    );
+    expect(racePageSlug('/races/marine-corps-marathon')).toBe('marine-corps-marathon');
+  });
+  it('is empty elsewhere', () => {
+    expect(racePageSlug('/cheersquad/')).toBe('');
+    expect(racePageSlug('/cheersquad/races/')).toBe('');
+    expect(racePageSlug('/cheersquad/races/%E0')).toBe('');
   });
 });

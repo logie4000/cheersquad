@@ -29,6 +29,17 @@ import {
 import { PdfPlan, PlanPdf } from './pdf-export';
 import { PlanService } from './plan.service';
 
+/** The slug of the race a races/<slug> page is for, or '' on any other page. */
+export function racePageSlug(path: string): string {
+  const m = /\/races\/([^/]+)$/.exec(path);
+  if (!m) return '';
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return '';
+  }
+}
+
 type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
 
 const COURSE_COLOR_KEY = 'cheersquad.courseColor';
@@ -163,19 +174,50 @@ export class App implements OnInit {
   ngOnInit(): void {
     // The race list is optional: on failure the dropdown just stays hidden.
     this.api.races().subscribe({
-      next: (r) => this.races.set(r ?? []),
+      next: (r) => {
+        this.races.set(r ?? []);
+        // A race's own page (races/<slug>) opens with that race loaded.
+        const slug = racePageSlug(location.pathname);
+        const race = slug ? this.races().find((r) => (r.slug ?? r.id) === slug) : undefined;
+        if (race) this.selectRace(race.id);
+      },
       error: () => this.races.set([]),
     });
+  }
+
+  /**
+   * Points the address bar at the race's own page (or the app's front page
+   * for '' or an upload), so the plan's link can be shared. The server
+   * serves race pages with <base href="../">, so the base is first pinned
+   * to the app's absolute URL to keep relative URLs (api/…) working.
+   */
+  private showRacePage(id: string): void {
+    const root = new URL('./', document.baseURI).href;
+    document.querySelector('base')?.setAttribute('href', root);
+    const race = id ? this.races().find((r) => r.id === id) : undefined;
+    const url = race ? `${root}races/${encodeURIComponent(race.slug ?? race.id)}` : root;
+    if (url !== location.href) history.replaceState(history.state, '', url);
+    // Same titles as the server gives these pages.
+    document.title = race
+      ? `Where to watch the ${race.shortName ?? race.name} | Cheer Squad`
+      : 'Cheer Squad: marathon spectator planner';
   }
 
   onFile(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     this.raceId.set('');
+    this.showRacePage('');
     return this.loadCourse(input.files?.[0] ?? null);
   }
 
   onRace(event: Event): void {
     const id = (event.target as HTMLSelectElement).value;
+    this.selectRace(id);
+    this.showRacePage(id);
+  }
+
+  /** Loads preloaded race id's course ('' clears the choice). */
+  selectRace(id: string): void {
     this.raceId.set(id);
     if (!id) return;
     const race = this.races().find((r) => r.id === id);

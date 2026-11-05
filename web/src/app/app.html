@@ -13,7 +13,7 @@
           <select [value]="raceId()" (change)="onRace($event); gpxInput.value = ''">
             <option value="">Select a route</option>
             @for (r of races(); track r.id) {
-              <option [value]="r.id">{{ r.name }}</option>
+              <option [value]="r.id" [selected]="r.id === raceId()">{{ r.name }}</option>
             }
           </select>
         </label>
@@ -312,3 +312,22 @@
     }
   </section>
 </main>
+
+<footer class="about">
+  <h2>How it works</h2>
+  <p>
+    Pick a race or upload the course as a GPX file, then enter your runner's goal finish time and
+    when you can set off. Cheer Squad works out when your runner reaches each part of the course and
+    plans the cheering spots you can get to in time on foot, by bike, by transit or by car, leaving
+    each spot as soon as they pass.
+  </p>
+  @if (races().length > 0) {
+    <p>
+      Preloaded races:
+      @for (r of races(); track r.id; let last = $last) {
+        <a [href]="'races/' + (r.slug ?? r.id)">{{ r.shortName ?? r.name }}</a
+        >{{ last ? '.' : ',' }}
+      }
+    </p>
+  }
+</footer>
