@@ -68,7 +68,7 @@ func TestSlugsAndShortNames(t *testing.T) {
 
 func TestShortNameOf(t *testing.T) {
 	for name, want := range map[string]string{
-		"Boston Marathon 2025":                 "Boston Marathon",
+		"Boston Marathon 2026":                 "Boston Marathon",
 		"NYC Marathon 2026 - Blue Route":       "NYC Marathon - Blue Route",
 		"TCS Sydney Marathon 2025 - 42.195 km": "TCS Sydney Marathon",
 		"BMW Berlin-Marathon 2026":             "BMW Berlin-Marathon",
@@ -116,7 +116,7 @@ func TestDefaultLoads(t *testing.T) {
 func TestBostonIsOnAWeekday(t *testing.T) {
 	for _, r := range Default.List() {
 		want := ""
-		if r.ID == "boston-2025" {
+		if r.ID == "boston-2026" {
 			want = "weekday"
 		}
 		if r.Day != want {
