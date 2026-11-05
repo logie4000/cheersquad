@@ -29,6 +29,17 @@ import {
 import { PdfPlan, PlanPdf } from './pdf-export';
 import { PlanService } from './plan.service';
 
+/** The race a race/<id> page is for, or '' on any other page. */
+export function racePageId(path: string): string {
+  const m = /\/race\/([^/]+)$/.exec(path);
+  if (!m) return '';
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return '';
+  }
+}
+
 type ClickMode = 'start' | 'pin' | 'exclude' | 'crossing';
 
 const COURSE_COLOR_KEY = 'cheersquad.courseColor';
@@ -163,19 +174,49 @@ export class App implements OnInit {
   ngOnInit(): void {
     // The race list is optional: on failure the dropdown just stays hidden.
     this.api.races().subscribe({
-      next: (r) => this.races.set(r ?? []),
+      next: (r) => {
+        this.races.set(r ?? []);
+        // A race's own page (race/<id>) opens with that race loaded.
+        const id = racePageId(location.pathname);
+        if (id && this.races().some((race) => race.id === id)) this.selectRace(id);
+      },
       error: () => this.races.set([]),
     });
+  }
+
+  /**
+   * Points the address bar at the race's own page (or the app's front page
+   * for '' or an upload), so the plan's link can be shared. The server
+   * serves race pages with <base href="../">, so the base is first pinned
+   * to the app's absolute URL to keep relative URLs (api/…) working.
+   */
+  private showRacePage(id: string): void {
+    const root = new URL('./', document.baseURI).href;
+    document.querySelector('base')?.setAttribute('href', root);
+    const url = id ? `${root}race/${encodeURIComponent(id)}` : root;
+    if (url !== location.href) history.replaceState(history.state, '', url);
+    // Same titles as the server gives these pages.
+    const name = this.races().find((r) => r.id === id)?.name;
+    document.title = name
+      ? `Where to watch the ${name} | Cheer Squad`
+      : 'Cheer Squad: marathon spectator planner';
   }
 
   onFile(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     this.raceId.set('');
+    this.showRacePage('');
     return this.loadCourse(input.files?.[0] ?? null);
   }
 
   onRace(event: Event): void {
     const id = (event.target as HTMLSelectElement).value;
+    this.selectRace(id);
+    this.showRacePage(id);
+  }
+
+  /** Loads preloaded race id's course ('' clears the choice). */
+  selectRace(id: string): void {
     this.raceId.set(id);
     if (!id) return;
     const race = this.races().find((r) => r.id === id);

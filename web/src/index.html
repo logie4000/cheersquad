@@ -9,7 +9,7 @@
       name="description"
       content="Free marathon spectator planner. Pick a race or upload a GPX course, enter your runner's goal time, and get the spots to stand so you see them as many times as possible, by foot, bike, transit or car."
     />
-    <!-- The Go server fills in __SITE_URL__ (see internal/site). -->
+    <!-- The Go server fills in __SITE_URL__ and the page's own URL. -->
     <link rel="canonical" href="__SITE_URL__" />
     <link rel="sitemap" type="application/xml" href="sitemap.xml" />
     <link rel="icon" href="favicon.ico" sizes="48x48" />
@@ -65,7 +65,8 @@
   <body>
     <app-root>
       <!-- What crawlers and link previews see before the app starts; the
-           app replaces it. The Go server fills in the race list. -->
+           app replaces it. The Go server swaps in each page's own intro,
+           title, description and URLs (see internal/site). -->
       <div class="intro">
         <h1>Cheer Squad</h1>
         <p>Plan where to stand so you see your runner as many times as possible.</p>
@@ -76,8 +77,6 @@
           your runner will be and when, then plans a route of cheering spots you can actually reach
           in time, with travel directions between them, a map, and a printable plan.
         </p>
-        <h2>Preloaded races</h2>
-        <ul data-races></ul>
         <noscript><p>Cheer Squad needs JavaScript to plan your day.</p></noscript>
       </div>
     </app-root>

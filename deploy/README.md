@@ -184,8 +184,10 @@ For street-network walking times while planning too, run a self-hosted
 
 The server fills in the page's canonical URL, Open Graph card and
 structured data from the request (Host, `X-Forwarded-Proto`,
-`X-Forwarded-Prefix`, all set by the Nginx snippet), and serves a sitemap at
-`/cheersquad/sitemap.xml`. Set `SITE_URL=https://<host>/cheersquad/` in the
+`X-Forwarded-Prefix`, all set by the Nginx snippet). Each preloaded race
+has its own page at `/cheersquad/race/<id>` (its own title, description and
+intro; the app opens with that race loaded), and `/cheersquad/sitemap.xml`
+lists the front page and every race page. Set `SITE_URL=https://<host>/cheersquad/` in the
 container's environment to pin it instead. API answers carry
 `X-Robots-Tag: noindex`.
 
