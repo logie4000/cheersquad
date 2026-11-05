@@ -274,3 +274,8 @@ button.export {
 td .pinned {
   color: var(--badge-pin);
 }
+.about {
+  margin-top: 2rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}

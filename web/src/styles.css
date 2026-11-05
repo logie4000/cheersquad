@@ -121,3 +121,19 @@ a {
     opacity: 1 !important;
   }
 }
+
+/* The crawlable intro in index.html, shown until the app starts. */
+app-root > .intro {
+  display: block;
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+app-root > .intro h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: clamp(2.75rem, 7vw, 4.5rem);
+  line-height: 1;
+  color: var(--brand);
+}

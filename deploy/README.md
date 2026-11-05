@@ -180,6 +180,31 @@ For street-network walking times while planning too, run a self-hosted
 [OSRM](https://project-osrm.org/) with the foot profile and uncomment
 `OSRM_WALK_URL` in `docker-compose.yml`. It's optional.
 
+## Search engines
+
+The server fills in the page's canonical URL, Open Graph card and
+structured data from the request (Host, `X-Forwarded-Proto`,
+`X-Forwarded-Prefix`, all set by the Nginx snippet), and serves a sitemap at
+`/cheersquad/sitemap.xml`. Set `SITE_URL=https://<host>/cheersquad/` in the
+container's environment to pin it instead. API answers carry
+`X-Robots-Tag: noindex`.
+
+Crawlers only read `robots.txt` at the domain root, which this app doesn't
+own. Add this line to the root site's `robots.txt` (creating it if there
+is none):
+
+```text
+Sitemap: https://<host>/cheersquad/sitemap.xml
+```
+
+Don't disallow `/cheersquad/api/`: Google renders the page with JavaScript
+and needs `api/races` to do it. The `noindex` header already keeps the API
+itself out of results.
+
+Then add the site in Google Search Console (and Bing Webmaster Tools),
+submit the sitemap, and use URL Inspection on `https://<host>/cheersquad/`
+to request indexing.
+
 ## Logs and status
 
 ```sh
