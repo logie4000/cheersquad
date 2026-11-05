@@ -2,7 +2,7 @@
 // that search engines and link previews read before any JavaScript runs:
 // the page's title, description and public URL (canonical link, Open Graph,
 // structured data) and a crawlable intro. Each preloaded race gets its own
-// page at race/<id>, which the app opens with that race selected. It also
+// page at race/<slug> (the race without its year), which the app opens with that race selected. It also
 // serves sitemap.xml.
 package site
 
@@ -73,11 +73,11 @@ func Home(list []races.Race) Page {
 
 // RacePage is the page for one preloaded race.
 func RacePage(r races.Race, list []races.Race) Page {
-	name := html.EscapeString(r.Name)
+	name := html.EscapeString(r.ShortName)
 	return Page{
-		Title:       fmt.Sprintf("Where to watch the %s | Cheer Squad", r.Name),
-		Description: fmt.Sprintf("Plan where to stand to cheer your runner at the %s: the spots you can reach in time on foot, by bike, transit or car, with a map and a printable plan. Free.", r.Name),
-		Path:        RacePrefix + r.ID,
+		Title:       fmt.Sprintf("Where to watch the %s | Cheer Squad", r.ShortName),
+		Description: fmt.Sprintf("Plan where to stand to cheer your runner at the %s: the spots you can reach in time on foot, by bike, transit or car, with a map and a printable plan. Free.", r.ShortName),
+		Path:        RacePrefix + r.Slug,
 		Base:        "../",
 		Intro: `<div class="intro"><h1>Where to watch the ` + name + `</h1>` +
 			`<p>Cheering at the ` + name + `? Cheer Squad plans where to stand so you see your runner as many times as possible.</p>` +
@@ -101,14 +101,14 @@ func raceLinks(list []races.Race, skip string) string {
 		if r.ID == skip {
 			continue
 		}
-		b.WriteString(`<li><a href="` + RacePrefix + html.EscapeString(url.PathEscape(r.ID)) + `">` + html.EscapeString(r.Name) + "</a></li>")
+		b.WriteString(`<li><a href="` + RacePrefix + html.EscapeString(url.PathEscape(r.Slug)) + `">` + html.EscapeString(r.ShortName) + "</a></li>")
 	}
 	b.WriteString("</ul>")
 	return b.String()
 }
 
 // Handler serves Dir. "/" and "/index.html" get the filled-in index.html,
-// "/race/<id>" the same for a race, "/sitemap.xml" a sitemap, other
+// "/race/<slug>" the same for a race, "/sitemap.xml" a sitemap, other
 // existing files as they are, and anything else a real 404.
 func Handler(cfg Config) http.Handler {
 	catalog := cfg.Races
@@ -118,7 +118,7 @@ func Handler(cfg Config) http.Handler {
 	list := catalog.List()
 	pages := map[string]Page{"/": Home(list), "/index.html": Home(list)}
 	for _, r := range list {
-		pages["/"+RacePrefix+r.ID] = RacePage(r, list)
+		pages["/"+RacePrefix+r.Slug] = RacePage(r, list)
 	}
 	files := http.FileServer(http.Dir(cfg.Dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +141,7 @@ func Handler(cfg Config) http.Handler {
 		if r.URL.Path == "/sitemap.xml" {
 			paths := []string{""}
 			for _, r := range list {
-				paths = append(paths, RacePrefix+r.ID)
+				paths = append(paths, RacePrefix+r.Slug)
 			}
 			w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 			w.Write([]byte(Sitemap(base, paths)))

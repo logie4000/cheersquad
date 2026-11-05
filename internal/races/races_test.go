@@ -25,10 +25,10 @@ func TestCatalogList(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Race{
-		{ID: "zeta", Name: "Alpha City Marathon"}, // metadata name, trimmed
-		{ID: "bravo", Name: "bravo half"},         // trk fallback, case-insensitive sort
-		{ID: "broken", Name: "broken"},            // parse error falls back to file name
-		{ID: "charlie", Name: "charlie"},          // no name falls back to file name
+		{ID: "zeta", Name: "Alpha City Marathon", Slug: "zeta", ShortName: "Alpha City Marathon"}, // metadata name, trimmed
+		{ID: "bravo", Name: "bravo half", Slug: "bravo", ShortName: "bravo half"},                 // trk fallback, case-insensitive sort
+		{ID: "broken", Name: "broken", Slug: "broken", ShortName: "broken"},                       // parse error falls back to file name
+		{ID: "charlie", Name: "charlie", Slug: "charlie", ShortName: "charlie"},                   // no name falls back to file name
 	}
 	got := c.List()
 	if len(got) != len(want) {
@@ -37,6 +37,49 @@ func TestCatalogList(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("%d: got %v want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSlugsAndShortNames(t *testing.T) {
+	c, err := NewCatalog(fstest.MapFS{
+		"boston-2025.gpx":   file(`<gpx><metadata><name>Boston Marathon 2025</name></metadata></gpx>`),
+		"boston-2026.gpx":   file(`<gpx><metadata><name>Boston Marathon 2026</name></metadata></gpx>`),
+		"nyc-2026-blue.gpx": file(`<gpx><metadata><name>NYC Marathon 2026 - Blue Route</name></metadata></gpx>`),
+		"mcm_2026.gpx":      file(`<gpx><metadata><name>2026</name></metadata></gpx>`),
+		"2024.gpx":          file(`<gpx><metadata><name>Twin Cities Marathon (2024)</name></metadata></gpx>`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		"boston-2026":   {"boston", "Boston Marathon"},
+		"boston-2025":   {"boston-2025", "Boston Marathon"}, // the newer file has the slug
+		"nyc-2026-blue": {"nyc-blue", "NYC Marathon - Blue Route"},
+		"mcm_2026":      {"mcm", "2026"},                         // a name that's only a year stays
+		"2024":          {"2024", "Twin Cities Marathon (2024)"}, // nothing left: keep the id
+	}
+	for _, r := range c.List() {
+		if got := [2]string{r.Slug, r.ShortName}; got != want[r.ID] {
+			t.Errorf("%s: got %v, want %v", r.ID, got, want[r.ID])
+		}
+	}
+}
+
+func TestShortNameOf(t *testing.T) {
+	for name, want := range map[string]string{
+		"Boston Marathon 2025":                 "Boston Marathon",
+		"NYC Marathon 2026 - Blue Route":       "NYC Marathon - Blue Route",
+		"TCS Sydney Marathon 2025 - 42.195 km": "TCS Sydney Marathon",
+		"BMW Berlin-Marathon 2026":             "BMW Berlin-Marathon",
+		"Foo City 13.1":                        "Foo City Half Marathon",
+		"Foo City 2026 - 26.2 miles":           "Foo City Marathon",
+		"Bar Half Marathon 21.1K":              "Bar Half Marathon",
+		"Baz 26.2 - Blue Route":                "Baz Marathon - Blue Route",
+		"2026":                                 "2026",
+	} {
+		if got := shortNameOf(name); got != want {
+			t.Errorf("%q: got %q, want %q", name, got, want)
 		}
 	}
 }

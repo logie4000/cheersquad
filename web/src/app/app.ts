@@ -29,8 +29,8 @@ import {
 import { PdfPlan, PlanPdf } from './pdf-export';
 import { PlanService } from './plan.service';
 
-/** The race a race/<id> page is for, or '' on any other page. */
-export function racePageId(path: string): string {
+/** The slug of the race a race/<slug> page is for, or '' on any other page. */
+export function racePageSlug(path: string): string {
   const m = /\/race\/([^/]+)$/.exec(path);
   if (!m) return '';
   try {
@@ -177,8 +177,9 @@ export class App implements OnInit {
       next: (r) => {
         this.races.set(r ?? []);
         // A race's own page (race/<id>) opens with that race loaded.
-        const id = racePageId(location.pathname);
-        if (id && this.races().some((race) => race.id === id)) this.selectRace(id);
+        const slug = racePageSlug(location.pathname);
+        const race = slug ? this.races().find((r) => (r.slug ?? r.id) === slug) : undefined;
+        if (race) this.selectRace(race.id);
       },
       error: () => this.races.set([]),
     });
@@ -193,12 +194,12 @@ export class App implements OnInit {
   private showRacePage(id: string): void {
     const root = new URL('./', document.baseURI).href;
     document.querySelector('base')?.setAttribute('href', root);
-    const url = id ? `${root}race/${encodeURIComponent(id)}` : root;
+    const race = id ? this.races().find((r) => r.id === id) : undefined;
+    const url = race ? `${root}race/${encodeURIComponent(race.slug ?? race.id)}` : root;
     if (url !== location.href) history.replaceState(history.state, '', url);
     // Same titles as the server gives these pages.
-    const name = this.races().find((r) => r.id === id)?.name;
-    document.title = name
-      ? `Where to watch the ${name} | Cheer Squad`
+    document.title = race
+      ? `Where to watch the ${race.shortName ?? race.name} | Cheer Squad`
       : 'Cheer Squad: marathon spectator planner';
   }
 

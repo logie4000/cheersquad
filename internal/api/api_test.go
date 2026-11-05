@@ -168,7 +168,7 @@ func TestRacesList(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("status %d type %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
-	if got, want := strings.TrimSpace(rec.Body.String()), `[{"id":"a","name":"a"},{"id":"b","name":"Beta Marathon"}]`; got != want {
+	if got, want := strings.TrimSpace(rec.Body.String()), `[{"id":"a","name":"a","slug":"a","shortName":"a"},{"id":"b","name":"Beta Marathon","slug":"b","shortName":"Beta Marathon"}]`; got != want {
 		t.Fatalf("got %s want %s", got, want)
 	}
 

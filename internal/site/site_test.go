@@ -38,7 +38,7 @@ func fixture(t *testing.T) (string, *races.Catalog) {
 		t.Fatal(err)
 	}
 	cat, err := races.NewCatalog(fstest.MapFS{
-		"boston-2025.gpx": {Data: []byte(strings.Replace(gpxNamed, "%s", "Boston &amp; Back", 1))},
+		"boston-2025.gpx": {Data: []byte(strings.Replace(gpxNamed, "%s", "Boston &amp; Back 2025", 1))},
 		"austin.gpx":      {Data: []byte(strings.Replace(gpxNamed, "%s", "Austin", 1))},
 	})
 	if err != nil {
@@ -96,7 +96,7 @@ func TestHomePage(t *testing.T) {
 			`<link rel="canonical" href="https://www.example.org/cheersquad/"`,
 			`content="https://www.example.org/cheersquad/og-image.png"`,
 			`"url": "https://www.example.org/cheersquad/"`,
-			`<li><a href="race/austin">Austin</a></li><li><a href="race/boston-2025">Boston &amp; Back</a></li>`,
+			`<li><a href="race/austin">Austin</a></li><li><a href="race/boston">Boston &amp; Back</a></li>`,
 		)
 		if strings.Contains(body, URLToken) {
 			t.Errorf("%s: %s left in the page", path, URLToken)
@@ -106,7 +106,7 @@ func TestHomePage(t *testing.T) {
 
 func TestRacePage(t *testing.T) {
 	dir, cat := fixture(t)
-	w := get(Handler(Config{Dir: dir, Races: cat}), "/race/boston-2025", proxied)
+	w := get(Handler(Config{Dir: dir, Races: cat}), "/race/boston", proxied)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -114,13 +114,13 @@ func TestRacePage(t *testing.T) {
 	contains(t, "race", body,
 		`<title>Where to watch the Boston &amp; Back | Cheer Squad</title>`,
 		`<base href="../"`,
-		`<link rel="canonical" href="https://www.example.org/cheersquad/race/boston-2025"`,
-		`content="https://www.example.org/cheersquad/race/boston-2025"`,
+		`<link rel="canonical" href="https://www.example.org/cheersquad/race/boston"`,
+		`content="https://www.example.org/cheersquad/race/boston"`,
 		`content="Plan where to stand to cheer your runner at the Boston &amp; Back:`,
 		`<h1>Where to watch the Boston &amp; Back</h1>`,
 		`<li><a href="race/austin">Austin</a></li></ul>`,
 	)
-	if strings.Contains(body, `href="race/boston-2025"`) {
+	if strings.Contains(body, `href="race/boston"`) {
 		t.Error("race page links to itself")
 	}
 	if w := get(Handler(Config{Dir: dir, Races: cat}), "/race/nope", nil); w.Code != 404 {
@@ -143,7 +143,7 @@ func TestSitemap(t *testing.T) {
 	contains(t, "sitemap", w.Body.String(),
 		"<loc>https://www.example.org/cheersquad/</loc>",
 		"<loc>https://www.example.org/cheersquad/race/austin</loc>",
-		"<loc>https://www.example.org/cheersquad/race/boston-2025</loc>",
+		"<loc>https://www.example.org/cheersquad/race/boston</loc>",
 	)
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/xml") {
 		t.Errorf("content type %q", ct)

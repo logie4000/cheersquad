@@ -325,7 +325,7 @@
     <p>
       Preloaded races:
       @for (r of races(); track r.id; let last = $last) {
-        <a [href]="'race/' + r.id">{{ r.name }}</a
+        <a [href]="'race/' + (r.slug ?? r.id)">{{ r.shortName ?? r.name }}</a
         >{{ last ? '.' : ',' }}
       }
     </p>
