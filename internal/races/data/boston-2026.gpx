@@ -5,14 +5,14 @@
 	 xmlns="http://www.topografix.com/GPX/1/1"
 	 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns2="http://www.garmin.com/xmlschemas/GpxExtensions/v3">
 	 <metadata>
-		<name>Boston Marathon 2025</name>
+		<name>Boston Marathon 2026</name>
 		 <link href="https://www.goandrace.com">
 		 <text>Garmin Connect</text>
 		 </link>
 	 <time>2026-10-28T14:47:26</time>
 	 </metadata>
 	 <trk>
-		 <name>Boston Marathon 2025 - 42.195 km</name>
+		 <name>Boston Marathon 2026 - 42.195 km</name>
 		 <trkseg>
 			 <trkpt lat="42.22975" lon="-71.518245">
 				 <ele>139</ele>

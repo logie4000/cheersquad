@@ -5,14 +5,14 @@
 	 xmlns="http://www.topografix.com/GPX/1/1"
 	 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns2="http://www.garmin.com/xmlschemas/GpxExtensions/v3">
 	 <metadata>
-		<name>Tokyo Marathon 2025</name>
+		<name>Tokyo Marathon 2026</name>
 		 <link href="https://www.goandrace.com">
 		 <text>Garmin Connect</text>
 		 </link>
 	 <time>2026-10-28T14:46:55</time>
 	 </metadata>
 	 <trk>
-		 <name>Tokyo Marathon 2025 - 42.195 km</name>
+		 <name>Tokyo Marathon 2026 - 42.195 km</name>
 		 <trkseg>
 			 <trkpt lat="35.689939" lon="139.692341">
 				 <ele>55</ele>

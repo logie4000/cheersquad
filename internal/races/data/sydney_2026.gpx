@@ -5,14 +5,14 @@
 	 xmlns="http://www.topografix.com/GPX/1/1"
 	 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns2="http://www.garmin.com/xmlschemas/GpxExtensions/v3">
 	 <metadata>
-		<name>TCS Sydney Marathon 2025 - 42.195 km</name>
+		<name>TCS Sydney Marathon 2026 - 42.195 km</name>
 		 <link href="https://www.goandrace.com">
 		 <text>Garmin Connect</text>
 		 </link>
 	 <time>2026-08-03T10:03:42</time>
 	 </metadata>
 	 <trk>
-		 <name>TCS Sydney Marathon 2025 - 42.195 km</name>
+		 <name>TCS Sydney Marathon 2026 - 42.195 km</name>
 		 <trkseg>
 			 <trkpt lat="-33.833204" lon="151.208004">
 				 <ele>79.2</ele>
