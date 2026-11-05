@@ -185,9 +185,9 @@ For street-network walking times while planning too, run a self-hosted
 The server fills in the page's canonical URL, Open Graph card and
 structured data from the request (Host, `X-Forwarded-Proto`,
 `X-Forwarded-Prefix`, all set by the Nginx snippet). Each preloaded race
-has its own page at `/cheersquad/race/<slug>`, the file name without its
-year (`boston-2025.gpx` -> `race/boston`), so a new year's file keeps the
-address. Titles drop the year too, and say "Marathon" or "Half Marathon"
+has its own page at `/cheersquad/races/<slug>`, built from its name without
+the year ("Boston Marathon 2025" -> `races/boston-marathon`), so a new
+year's file keeps the address. Titles drop the year too, and say "Marathon" or "Half Marathon"
 rather than a distance. The app opens a race page with that race loaded, and `/cheersquad/sitemap.xml`
 lists the front page and every race page. Set `SITE_URL=https://<host>/cheersquad/` in the
 container's environment to pin it instead. API answers carry

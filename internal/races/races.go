@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/logie4000/cheersquad/internal/gpx"
 )
@@ -26,9 +27,9 @@ var embedded embed.FS
 type Race struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	// Slug names the race's page (race/<slug>): the id without its year,
-	// so the address stays the same when a course file is replaced by next
-	// year's. When two files share one, the later year gets it and the
+	// Slug names the race's page (races/<slug>): ShortName as an address
+	// ("boston-marathon"), so it stays the same when a course file is
+	// replaced by next year's. When two files share one, the later year gets it and the
 	// other keeps its id.
 	Slug string `json:"slug"`
 	// ShortName is Name without the year, and with a standard distance
@@ -100,18 +101,24 @@ func NewCatalog(fsys fs.FS) (*Catalog, error) {
 
 var yearRe = regexp.MustCompile(`^(19|20)[0-9][0-9]$`)
 
-// slugOf is id without any year part ("nyc-2026-blue" -> "nyc-blue").
-func slugOf(id string) string {
-	var keep []string
-	for _, part := range strings.FieldsFunc(id, func(r rune) bool { return r == '-' || r == '_' }) {
-		if !yearRe.MatchString(part) {
-			keep = append(keep, strings.ToLower(part))
+// slugOf turns a short name into a page address ("NYC Marathon - Blue
+// Route" -> "nyc-marathon-blue-route"): lower case, letters and digits only,
+// runs of anything else as one "-".
+func slugOf(name string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(name) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r)
+			dash = false
+		} else {
+			dash = true
 		}
 	}
-	if len(keep) == 0 {
-		return id
-	}
-	return strings.Join(keep, "-")
+	return b.String()
 }
 
 // Standard distances written into some race names, and the race type
@@ -171,8 +178,8 @@ func assignSlugs(list []Race) {
 	sort.Slice(order, func(a, b int) bool { return list[order[a]].ID > list[order[b]].ID })
 	taken := map[string]bool{}
 	for _, i := range order {
-		slug := slugOf(list[i].ID)
-		if taken[slug] {
+		slug := slugOf(list[i].ShortName)
+		if slug == "" || taken[slug] {
 			slug = list[i].ID
 		}
 		taken[slug] = true

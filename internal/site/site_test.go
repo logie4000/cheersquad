@@ -96,7 +96,7 @@ func TestHomePage(t *testing.T) {
 			`<link rel="canonical" href="https://www.example.org/cheersquad/"`,
 			`content="https://www.example.org/cheersquad/og-image.png"`,
 			`"url": "https://www.example.org/cheersquad/"`,
-			`<li><a href="race/austin">Austin</a></li><li><a href="race/boston">Boston &amp; Back</a></li>`,
+			`<li><a href="races/austin">Austin</a></li><li><a href="races/boston-back">Boston &amp; Back</a></li>`,
 		)
 		if strings.Contains(body, URLToken) {
 			t.Errorf("%s: %s left in the page", path, URLToken)
@@ -106,7 +106,7 @@ func TestHomePage(t *testing.T) {
 
 func TestRacePage(t *testing.T) {
 	dir, cat := fixture(t)
-	w := get(Handler(Config{Dir: dir, Races: cat}), "/race/boston", proxied)
+	w := get(Handler(Config{Dir: dir, Races: cat}), "/races/boston-back", proxied)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -114,16 +114,16 @@ func TestRacePage(t *testing.T) {
 	contains(t, "race", body,
 		`<title>Where to watch the Boston &amp; Back | Cheer Squad</title>`,
 		`<base href="../"`,
-		`<link rel="canonical" href="https://www.example.org/cheersquad/race/boston"`,
-		`content="https://www.example.org/cheersquad/race/boston"`,
+		`<link rel="canonical" href="https://www.example.org/cheersquad/races/boston-back"`,
+		`content="https://www.example.org/cheersquad/races/boston-back"`,
 		`content="Plan where to stand to cheer your runner at the Boston &amp; Back:`,
 		`<h1>Where to watch the Boston &amp; Back</h1>`,
-		`<li><a href="race/austin">Austin</a></li></ul>`,
+		`<li><a href="races/austin">Austin</a></li></ul>`,
 	)
-	if strings.Contains(body, `href="race/boston"`) {
+	if strings.Contains(body, `href="races/boston-back"`) {
 		t.Error("race page links to itself")
 	}
-	if w := get(Handler(Config{Dir: dir, Races: cat}), "/race/nope", nil); w.Code != 404 {
+	if w := get(Handler(Config{Dir: dir, Races: cat}), "/races/nope", nil); w.Code != 404 {
 		t.Errorf("unknown race: status %d, want 404", w.Code)
 	}
 }
@@ -131,7 +131,7 @@ func TestRacePage(t *testing.T) {
 func TestConfiguredURLWins(t *testing.T) {
 	dir, cat := fixture(t)
 	h := Handler(Config{Dir: dir, Races: cat, URL: "https://cheer.example/"})
-	contains(t, "configured", get(h, "/race/austin", proxied).Body.String(), `href="https://cheer.example/race/austin"`)
+	contains(t, "configured", get(h, "/races/austin", proxied).Body.String(), `href="https://cheer.example/races/austin"`)
 }
 
 func TestSitemap(t *testing.T) {
@@ -142,8 +142,8 @@ func TestSitemap(t *testing.T) {
 	}
 	contains(t, "sitemap", w.Body.String(),
 		"<loc>https://www.example.org/cheersquad/</loc>",
-		"<loc>https://www.example.org/cheersquad/race/austin</loc>",
-		"<loc>https://www.example.org/cheersquad/race/boston</loc>",
+		"<loc>https://www.example.org/cheersquad/races/austin</loc>",
+		"<loc>https://www.example.org/cheersquad/races/boston-back</loc>",
 	)
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/xml") {
 		t.Errorf("content type %q", ct)
@@ -156,7 +156,7 @@ func TestFilesAndNotFound(t *testing.T) {
 	if w := get(h, "/app.js", nil); w.Code != 200 || w.Body.String() != "js" {
 		t.Errorf("app.js: %d %q", w.Code, w.Body.String())
 	}
-	for _, path := range []string{"/nope", "/some/route", "/fonts/", "/race/", "/../etc/passwd"} {
+	for _, path := range []string{"/nope", "/some/route", "/fonts/", "/races/", "/race/boston-back", "/../etc/passwd"} {
 		if w := get(h, path, nil); w.Code != 404 {
 			t.Errorf("%s: status %d, want 404", path, w.Code)
 		}

@@ -29,9 +29,9 @@ import {
 import { PdfPlan, PlanPdf } from './pdf-export';
 import { PlanService } from './plan.service';
 
-/** The slug of the race a race/<slug> page is for, or '' on any other page. */
+/** The slug of the race a races/<slug> page is for, or '' on any other page. */
 export function racePageSlug(path: string): string {
-  const m = /\/race\/([^/]+)$/.exec(path);
+  const m = /\/races\/([^/]+)$/.exec(path);
   if (!m) return '';
   try {
     return decodeURIComponent(m[1]);
@@ -176,7 +176,7 @@ export class App implements OnInit {
     this.api.races().subscribe({
       next: (r) => {
         this.races.set(r ?? []);
-        // A race's own page (race/<id>) opens with that race loaded.
+        // A race's own page (races/<slug>) opens with that race loaded.
         const slug = racePageSlug(location.pathname);
         const race = slug ? this.races().find((r) => (r.slug ?? r.id) === slug) : undefined;
         if (race) this.selectRace(race.id);
@@ -195,7 +195,7 @@ export class App implements OnInit {
     const root = new URL('./', document.baseURI).href;
     document.querySelector('base')?.setAttribute('href', root);
     const race = id ? this.races().find((r) => r.id === id) : undefined;
-    const url = race ? `${root}race/${encodeURIComponent(race.slug ?? race.id)}` : root;
+    const url = race ? `${root}races/${encodeURIComponent(race.slug ?? race.id)}` : root;
     if (url !== location.href) history.replaceState(history.state, '', url);
     // Same titles as the server gives these pages.
     document.title = race

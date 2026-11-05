@@ -99,7 +99,7 @@ export interface PlanResponse {
 export interface Race {
   id: string;
   name: string;
-  /** Names the race's page, race/<slug>: the id without its year. */
+  /** Names the race's page, races/<slug>, e.g. boston-marathon. */
   slug?: string;
   /** The name without its year, for page titles and links. */
   shortName?: string;

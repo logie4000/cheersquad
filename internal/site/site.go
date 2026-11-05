@@ -2,7 +2,7 @@
 // that search engines and link previews read before any JavaScript runs:
 // the page's title, description and public URL (canonical link, Open Graph,
 // structured data) and a crawlable intro. Each preloaded race gets its own
-// page at race/<slug> (the race without its year), which the app opens with that race selected. It also
+// page at races/<slug> (its name without the year, e.g. boston-marathon), which the app opens with that race selected. It also
 // serves sitemap.xml.
 package site
 
@@ -24,7 +24,7 @@ import (
 const URLToken = "__SITE_URL__"
 
 // RacePrefix is the path of the race pages, relative to the app.
-const RacePrefix = "race/"
+const RacePrefix = "races/"
 
 // Config is what Handler needs.
 type Config struct {
@@ -108,7 +108,7 @@ func raceLinks(list []races.Race, skip string) string {
 }
 
 // Handler serves Dir. "/" and "/index.html" get the filled-in index.html,
-// "/race/<slug>" the same for a race, "/sitemap.xml" a sitemap, other
+// "/races/<slug>" the same for a race, "/sitemap.xml" a sitemap, other
 // existing files as they are, and anything else a real 404.
 func Handler(cfg Config) http.Handler {
 	catalog := cfg.Races

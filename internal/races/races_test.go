@@ -25,10 +25,10 @@ func TestCatalogList(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Race{
-		{ID: "zeta", Name: "Alpha City Marathon", Slug: "zeta", ShortName: "Alpha City Marathon"}, // metadata name, trimmed
-		{ID: "bravo", Name: "bravo half", Slug: "bravo", ShortName: "bravo half"},                 // trk fallback, case-insensitive sort
-		{ID: "broken", Name: "broken", Slug: "broken", ShortName: "broken"},                       // parse error falls back to file name
-		{ID: "charlie", Name: "charlie", Slug: "charlie", ShortName: "charlie"},                   // no name falls back to file name
+		{ID: "zeta", Name: "Alpha City Marathon", Slug: "alpha-city-marathon", ShortName: "Alpha City Marathon"}, // metadata name, trimmed
+		{ID: "bravo", Name: "bravo half", Slug: "bravo-half", ShortName: "bravo half"},                           // trk fallback, case-insensitive sort
+		{ID: "broken", Name: "broken", Slug: "broken", ShortName: "broken"},                                      // parse error falls back to file name
+		{ID: "charlie", Name: "charlie", Slug: "charlie", ShortName: "charlie"},                                  // no name falls back to file name
 	}
 	got := c.List()
 	if len(got) != len(want) {
@@ -53,11 +53,11 @@ func TestSlugsAndShortNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][2]string{
-		"boston-2026":   {"boston", "Boston Marathon"},
+		"boston-2026":   {"boston-marathon", "Boston Marathon"},
 		"boston-2025":   {"boston-2025", "Boston Marathon"}, // the newer file has the slug
-		"nyc-2026-blue": {"nyc-blue", "NYC Marathon - Blue Route"},
-		"mcm_2026":      {"mcm", "2026"},                         // a name that's only a year stays
-		"2024":          {"2024", "Twin Cities Marathon (2024)"}, // nothing left: keep the id
+		"nyc-2026-blue": {"nyc-marathon-blue-route", "NYC Marathon - Blue Route"},
+		"mcm_2026":      {"2026", "2026"}, // a name that's only a year stays
+		"2024":          {"twin-cities-marathon-2024", "Twin Cities Marathon (2024)"},
 	}
 	for _, r := range c.List() {
 		if got := [2]string{r.Slug, r.ShortName}; got != want[r.ID] {

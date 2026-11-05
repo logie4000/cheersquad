@@ -152,11 +152,16 @@ describe('App', () => {
     });
 
     it('opens a race page with its race loaded', () => {
-      history.replaceState(null, '', '/cheersquad/race/nyc');
+      history.replaceState(null, '', '/cheersquad/races/nyc-marathon');
       const fixture = render();
       http.expectOne('api/races').flush([
-        { id: 'boston-2025', name: 'Boston Marathon 2025', slug: 'boston', day: 'weekday' },
-        { id: 'nyc-2026', name: 'New York City Marathon 2026', slug: 'nyc' },
+        {
+          id: 'boston-2025',
+          name: 'Boston Marathon 2025',
+          slug: 'boston-marathon',
+          day: 'weekday',
+        },
+        { id: 'nyc-2026', name: 'New York City Marathon 2026', slug: 'nyc-marathon' },
       ]);
       http.expectOne('api/races/nyc-2026').flush(GPX);
       fixture.detectChanges();
@@ -166,7 +171,7 @@ describe('App', () => {
     });
 
     it('ignores a race page for a race it does not know', () => {
-      history.replaceState(null, '', '/cheersquad/race/gone');
+      history.replaceState(null, '', '/cheersquad/races/gone');
       const fixture = render();
       http.expectOne('api/races').flush([{ id: 'boston', name: 'Boston Marathon' }]);
       expect(fixture.componentInstance.raceId()).toBe('');
@@ -182,7 +187,7 @@ describe('App', () => {
         {
           id: 'boston-2025',
           name: 'Boston Marathon 2025',
-          slug: 'boston',
+          slug: 'boston-marathon',
           shortName: 'Boston Marathon',
         },
       ]);
@@ -191,7 +196,7 @@ describe('App', () => {
       select.value = 'boston-2025';
       select.dispatchEvent(new Event('change'));
       http.expectOne('api/races/boston-2025').flush(GPX);
-      expect(location.pathname).toBe('/cheersquad/race/boston');
+      expect(location.pathname).toBe('/cheersquad/races/boston-marathon');
       expect(document.title).toBe('Where to watch the Boston Marathon | Cheer Squad');
       void fixture.componentInstance.onFile({ target: { files: [] } } as unknown as Event);
       expect(location.pathname).toBe('/cheersquad/');
@@ -459,12 +464,14 @@ describe('App', () => {
 
 describe('racePageSlug', () => {
   it('reads the race from a race page path', () => {
-    expect(racePageSlug('/cheersquad/race/nyc-blue')).toBe('nyc-blue');
-    expect(racePageSlug('/race/mcm')).toBe('mcm');
+    expect(racePageSlug('/cheersquad/races/nyc-marathon-blue-route')).toBe(
+      'nyc-marathon-blue-route',
+    );
+    expect(racePageSlug('/races/marine-corps-marathon')).toBe('marine-corps-marathon');
   });
   it('is empty elsewhere', () => {
     expect(racePageSlug('/cheersquad/')).toBe('');
-    expect(racePageSlug('/cheersquad/race/')).toBe('');
-    expect(racePageSlug('/cheersquad/race/%E0')).toBe('');
+    expect(racePageSlug('/cheersquad/races/')).toBe('');
+    expect(racePageSlug('/cheersquad/races/%E0')).toBe('');
   });
 });
