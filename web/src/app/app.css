@@ -14,9 +14,23 @@ header h1 {
   padding-bottom: 0.15em;
   color: var(--brand);
 }
-header p {
-  margin: 0 0 1rem;
+/* Title on the left, motto on the right sharing its baseline; the header
+   spans the same width as main, so the motto ends at the map's right edge. */
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+header .motto {
+  margin: 0 0 0 auto;
+  font-family: 'Cardo', Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(1.1rem, 2.4vw, 1.6rem);
   color: var(--muted);
+  white-space: nowrap;
 }
 h2 {
   font-family: var(--display);

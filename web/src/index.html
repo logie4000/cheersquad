@@ -50,8 +50,9 @@
       }
     </script>
 
-    <!-- Same display face as sweat-equity, served from here rather than
-         Google Fonts so the first paint waits on no third party. -->
+    <!-- Same display face as sweat-equity (and Cardo for the motto), served
+         from here rather than Google Fonts so the first paint waits on no
+         third party. -->
     <link rel="preload" href="fonts/BigShoulders-Black.ttf" as="font" type="font/ttf" crossorigin />
     <style>
       @font-face {
@@ -59,6 +60,14 @@
         font-weight: 900;
         font-display: swap;
         src: url('fonts/BigShoulders-Black.ttf') format('truetype');
+      }
+      /* Cardo Italic (Google Fonts, OFL) for the header motto, subset to Latin. */
+      @font-face {
+        font-family: 'Cardo';
+        font-style: italic;
+        font-weight: 400;
+        font-display: swap;
+        src: url('fonts/Cardo-Italic.woff2') format('woff2');
       }
     </style>
   </head>
