@@ -14,7 +14,7 @@
     "@angular/compiler": "^21.2.0",
     "@angular/core": "^21.2.0",
     "@angular/forms": "^21.2.0",
-    "@angular/platform-browser": "^21.2.0",
+    "@angular/platform-browser": "^22.3.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
     "leaflet": "^1.9.4",
