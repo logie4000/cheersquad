@@ -1,0 +1,45 @@
+name: Dependabot auto-merge
+
+# Approves Dependabot's patch and minor update PRs and turns on auto-merge
+# (squash). GitHub then merges each one only after the required status checks
+# (CI) pass. Major updates are left alone for a human to review.
+#
+# Needs, in the repository settings:
+#   - General > Pull Requests > "Allow auto-merge"
+#   - A branch protection rule (or ruleset) on main that requires the CI
+#     checks "go" and "web"; without it auto-merge merges immediately.
+#   - Actions > General > "Allow GitHub Actions to create and approve pull
+#     requests" (only for the approve step; merging works without it).
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'logie4000/cheersquad'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge (squash)
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Approve
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        # Only matters if main requires an approving review. Fails harmlessly
+        # when Actions may not approve PRs.
+        continue-on-error: true
+        run: gh pr review --approve "$PR_URL" --body "Patch/minor dependency update; auto-merging after CI passes."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
