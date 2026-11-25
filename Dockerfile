@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npx ng build
 
 # Build the Go server as a static linux/amd64 binary (the EC2 host is x86_64).
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
