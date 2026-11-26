@@ -8,6 +8,7 @@ import {
   output,
   signal,
   viewChild,
+  ChangeDetectionStrategy,
 } from '@angular/core';
 import * as L from 'leaflet';
 import {
@@ -45,6 +46,7 @@ const PRINT_TILE_WAIT_MS = 4000;
   template: '<div #map class="map"></div>',
   // print-size is the printed map's size, applied on screen while tiles load
   // for the PDF so Leaflet lays out exactly what the page will show.
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: `
     :host {
       display: block;
