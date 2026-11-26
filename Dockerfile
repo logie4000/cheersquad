@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build the Angular UI.
-FROM node:24-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npx ng build
 
 # Build the Go server as a static linux/amd64 binary (the EC2 host is x86_64).
-FROM golang:1.24-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
