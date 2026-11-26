@@ -27,12 +27,25 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     groups:
-      # Angular packages must move together, so they share one PR even
-      # for majors (ng update style).
+      # Angular packages must move together, so they share one PR.
       angular:
         patterns: ["@angular/*", "@angular-devkit/*", "@schematics/angular"]
       npm-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # Angular majors need `ng update` (code migrations plus a matching
+      # TypeScript), which Dependabot can't do: one-package PRs fail npm ci on
+      # peer dependencies. Upgrade those by hand once a year.
+      - dependency-name: "@angular/*"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@angular-devkit/*"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@schematics/angular"
+        update-types: [version-update:semver-major]
+      # Angular pins TypeScript to one minor (e.g. >=6.0 <6.1); ng update
+      # moves it.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major, version-update:semver-minor]
     commit-message:
       prefix: deps(web)
 
