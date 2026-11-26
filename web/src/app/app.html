@@ -270,8 +270,7 @@
                               class="line"
                               [style.background-color]="lineBg(st)"
                               [style.color]="lineFg(st)"
-                              >{{ st.line || 'Subway' }}</span
-                            >{{ ' ' }}
+                              >{{ st.line || 'Subway' }}</span>{{ ' ' }}
                           }
                           <a
                             [href]="stepLink(st)"
@@ -325,8 +324,9 @@
     <p>
       Preloaded races:
       @for (r of races(); track r.id; let last = $last) {
-        <a [href]="'races/' + (r.slug ?? r.id)">{{ r.shortName ?? r.name }}</a
-        >{{ last ? '.' : ',' }}
+        <a [href]="'races/' + (r.slug ?? r.id)">{{ r.shortName ?? r.name }}</a>{{
+          last ? '.' : ','
+        }}
       }
     </p>
   }
